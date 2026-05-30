@@ -20,7 +20,7 @@ import {
 } from "../config";
 import { Rng, randomSeed } from "../systems/Rng";
 import { QuestionManager, type Question } from "../systems/QuestionManager";
-import { TempSfx } from "../systems/TempSfx";
+import { audio } from "../systems/AudioManager";
 import { MusicBed } from "../systems/MusicBed";
 
 interface GameInit {
@@ -57,7 +57,6 @@ export class GameScene extends Phaser.Scene {
   private seed = 0;
 
   private rng!: Rng;
-  private sfx = new TempSfx();
   private music = new MusicBed();
   private questions!: QuestionManager;
 
@@ -224,7 +223,7 @@ export class GameScene extends Phaser.Scene {
     // Make sure the music loop is torn down (and pitch reset) when the scene ends.
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
       this.music.setRate(1);
-      this.sfx.setRate(1);
+      audio.setRate(1);
       this.music.pause();
     });
   }
@@ -416,7 +415,7 @@ export class GameScene extends Phaser.Scene {
   setVolume(v: number): void {
     this.volume = Phaser.Math.Clamp(v, 0, 1);
     this.music.setMasterVolume(this.volume);
-    this.sfx.setMasterVolume(this.volume);
+    audio.setMasterVolume(this.volume);
     localStorage.setItem(STORAGE.volume, String(this.volume));
   }
 
@@ -426,13 +425,13 @@ export class GameScene extends Phaser.Scene {
 
   private flap(): void {
     if (this.gameOver || this.quizActive) return;
-    this.sfx.unlock();
+    audio.unlock();
 
     if (!this.started) this.startRun();
     if (this.graceUntil > 0) this.endGrace();
 
     this.birdBody.setVelocityY(-PHYSICS.flapVelocity * this.timeFactor);
-    this.sfx.flap();
+    audio.play("flap");
   }
 
   private startRun(): void {
@@ -671,7 +670,7 @@ export class GameScene extends Phaser.Scene {
       if (!pair.scored && pair.top.x + OBSTACLES.width / 2 < this.bird.x) {
         pair.scored = true;
         this.applyScore(SCORE_PER_PASS);
-        this.sfx.pass();
+        audio.play("pass");
         this.popScoreText();
       }
       if (pair.top.x < -OBSTACLES.width) {
@@ -723,7 +722,7 @@ export class GameScene extends Phaser.Scene {
     const before = this.multiplier;
     this.combo += 1;
     this.applyScore(POUTINE.value);
-    this.sfx.pass();
+    audio.play("pickup");
     this.popScoreText();
 
     // Spark burst — bigger at higher tiers; the whole field heats up if a new tier is hit.
@@ -741,7 +740,7 @@ export class GameScene extends Phaser.Scene {
     this.tweens.killTweensOf(pw);
     pw.destroy();
     this.sparks.explode(16, x, y);
-    this.sfx.pass();
+    audio.play(kind); // slowmo / invincible (envoye donc!) / magnet / heart
 
     switch (kind) {
       case "slowmo":
@@ -811,7 +810,7 @@ export class GameScene extends Phaser.Scene {
     if (rate !== this.audioRate) {
       this.audioRate = rate;
       this.music.setRate(rate);
-      this.sfx.setRate(rate);
+      audio.setRate(rate);
     }
   }
 
@@ -891,7 +890,7 @@ export class GameScene extends Phaser.Scene {
     const idx = this.gates.indexOf(gate);
     if (idx >= 0) this.gates.splice(idx, 1);
 
-    this.sfx.pass();
+    audio.play("quiz_start");
     this.music.pause();
     const question = this.questions.next(this.score);
     this.scene.pause();
@@ -908,12 +907,14 @@ export class GameScene extends Phaser.Scene {
     // to immediately pause it again.
     this.scene.resume();
     if (correct) {
+      audio.play("quiz_correct");
       this.applyScore(QUIZ.bonus);
       this.popScoreText();
       if (!this.shielded) this.grantShield();
     } else {
       // A wrong answer costs a life and also strips any shield earned earlier; loseLife breaks
       // the combo too. If that empties the last life, the game is already over — bail out.
+      audio.play("quiz_wrong");
       if (this.shielded) this.clearShield();
       this.loseLife(false);
       if (this.gameOver) return;
@@ -947,6 +948,7 @@ export class GameScene extends Phaser.Scene {
 
   private grantShield(): void {
     this.shielded = true;
+    audio.play("shield");
     this.shieldRing = this.add
       .circle(this.bird.x, this.bird.y, 30)
       .setStrokeStyle(3, 0x43c463, 0.9)
@@ -1094,8 +1096,8 @@ export class GameScene extends Phaser.Scene {
   private triggerGameOver(): void {
     if (this.gameOver) return;
     this.gameOver = true;
-    this.sfx.setRate(1);
-    this.sfx.gameover();
+    audio.setRate(1);
+    audio.play("gameover");
     this.music.setRate(1);
     this.music.pause();
     this.stopAura();

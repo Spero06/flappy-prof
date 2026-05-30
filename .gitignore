@@ -5,3 +5,9 @@ dist/
 *.log
 .DS_Store
 .vite/
+
+# Local audio working files (raw recordings + ffmpeg previews). The FINAL, used clips live
+# in public/audio/ and ARE committed. Originals are kept locally, not in the repo.
+sesler/
+sesler wav/
+.claude/settings.local.json

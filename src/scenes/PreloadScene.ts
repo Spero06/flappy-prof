@@ -1,5 +1,6 @@
 import Phaser from "phaser";
 import { GAME, SCENES } from "../config";
+import { audio } from "../systems/AudioManager";
 
 /**
  * Loads assets and shows a progress bar. Real sprites/audio arrive in later phases;
@@ -15,10 +16,14 @@ export class PreloadScene extends Phaser.Scene {
     this.drawLoadingBar();
     // Grammar bank (authored content — loaded, never modified). Served from public/.
     this.load.json("questions", "questions.json");
+    // Sound manifest (event -> clip list). Clips themselves are decoded by AudioManager.
+    this.load.json("audio", "audio.json");
   }
 
   create(): void {
     this.generatePlaceholderTextures();
+    // Kick off clip preloading/decoding now so sounds are ready by the time a run starts.
+    audio.init((this.cache.json.get("audio") as Record<string, string[]>) ?? {});
     this.waitForFonts().then(() => this.scene.start(SCENES.Menu));
   }
 

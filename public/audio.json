@@ -1,0 +1,16 @@
+{
+  "_comment": "Event -> clip list. AudioManager picks a RANDOM clip per event (variety). Adding sounds = drop .mp3 in public/audio/ + list it here; NO code change. Events with [] use a subtle synth fallback until real clips arrive (see CLAUDE.md 5.1/5.4).",
+  "flap":         ["audio/flap_01.mp3", "audio/flap_02.mp3", "audio/flap_03.mp3"],
+  "pass":         ["audio/pass_01.mp3", "audio/pass_02.mp3", "audio/pass_03.mp3"],
+  "pickup":       [],
+  "quiz_start":   [],
+  "quiz_correct": [],
+  "quiz_wrong":   ["audio/quiz_wrong_01.mp3"],
+  "shield":       [],
+  "slowmo":       [],
+  "invincible":   ["audio/invincible_01.mp3"],
+  "magnet":       [],
+  "heart":        [],
+  "milestone":    [],
+  "gameover":     []
+}
