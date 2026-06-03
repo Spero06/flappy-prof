@@ -236,3 +236,136 @@ export function joinRoom(
     },
   };
 }
+
+// --- Room registry (the browsable lobby list, CLAUDE.md 8.2) -----------------
+//
+// One-time SQL (Supabase SQL editor) — a digit-only password, never returned to the list
+// (joining filters on it server-side); anon can read/create/update, rows auto-expire from the
+// list after an hour:
+//
+//   create table public.rooms (
+//     id          uuid primary key default gen_random_uuid(),
+//     created_at  timestamptz not null default now(),
+//     name        text not null check (char_length(name) between 1 and 24),
+//     password    text not null check (password ~ '^[0-9]+$'),
+//     host_name   text not null,
+//     status      text not null default 'open' check (status in ('open','started','closed'))
+//   );
+//   alter table public.rooms enable row level security;
+//   create policy "anon read rooms"   on public.rooms for select to anon using (true);
+//   create policy "anon create rooms" on public.rooms for insert to anon with check (true);
+//   create policy "anon update rooms" on public.rooms for update to anon using (true) with check (true);
+//   alter publication supabase_realtime add table public.rooms;
+//   -- optional hardening (hide the password column from the anon role entirely):
+//   -- revoke select on public.rooms from anon;
+//   -- grant select (id, created_at, name, host_name, status) on public.rooms to anon;
+
+export interface RoomRow {
+  id: string;
+  created_at: string;
+  name: string;
+  host_name: string;
+  status: "open" | "started" | "closed";
+}
+
+const ROOM_COLS = "id,created_at,name,host_name,status";
+
+/** Create a room (host becomes admin). Returns the row (no password), or null on error. */
+export async function createRoom(
+  name: string,
+  password: string,
+  hostName: string,
+): Promise<RoomRow | null> {
+  const c = getClient();
+  if (!c) return null;
+  const payload = {
+    name: name.trim().slice(0, 24) || "Salle",
+    password,
+    host_name: hostName.trim().slice(0, 24) || "Anonyme",
+    status: "open",
+  };
+  try {
+    const { data, error } = await c.from("rooms").insert(payload).select(ROOM_COLS).single();
+    if (error) {
+      console.warn("[Net] createRoom failed:", error.message);
+      return null;
+    }
+    return data as RoomRow;
+  } catch (err) {
+    console.warn("[Net] createRoom threw:", err);
+    return null;
+  }
+}
+
+/** List open rooms created within the last hour (newest first). */
+export async function fetchOpenRooms(): Promise<RoomRow[]> {
+  const c = getClient();
+  if (!c) return [];
+  try {
+    const since = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+    const { data, error } = await c
+      .from("rooms")
+      .select(ROOM_COLS)
+      .eq("status", "open")
+      .gte("created_at", since)
+      .order("created_at", { ascending: false })
+      .limit(30);
+    if (error) {
+      console.warn("[Net] fetchOpenRooms failed:", error.message);
+      return [];
+    }
+    return (data ?? []) as RoomRow[];
+  } catch (err) {
+    console.warn("[Net] fetchOpenRooms threw:", err);
+    return [];
+  }
+}
+
+/** Verify a room password (server-side filter — the password is never returned). */
+export async function verifyRoom(id: string, password: string): Promise<RoomRow | null> {
+  const c = getClient();
+  if (!c) return null;
+  try {
+    const { data, error } = await c
+      .from("rooms")
+      .select(ROOM_COLS)
+      .eq("id", id)
+      .eq("password", password)
+      .maybeSingle();
+    if (error) {
+      console.warn("[Net] verifyRoom failed:", error.message);
+      return null;
+    }
+    return (data as RoomRow) ?? null;
+  } catch (err) {
+    console.warn("[Net] verifyRoom threw:", err);
+    return null;
+  }
+}
+
+/** Update a room's status (e.g. 'started' to drop it from the open list, 'closed' on leave). */
+export async function setRoomStatus(
+  id: string,
+  status: "open" | "started" | "closed",
+): Promise<void> {
+  const c = getClient();
+  if (!c) return;
+  try {
+    await c.from("rooms").update({ status }).eq("id", id);
+  } catch (err) {
+    console.warn("[Net] setRoomStatus threw:", err);
+  }
+}
+
+/** Live-update the room list (any change to the rooms table). Returns an unsubscribe fn. */
+export function subscribeRooms(onChange: () => void): () => void {
+  const c = getClient();
+  if (!c) return () => {};
+  const channel = c
+    .channel("public:rooms")
+    .on("postgres_changes", { event: "*", schema: "public", table: "rooms" }, () => onChange())
+    .subscribe();
+  return () => {
+    void c.removeChannel(channel);
+  };
+}

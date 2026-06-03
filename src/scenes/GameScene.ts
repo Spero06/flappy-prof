@@ -28,6 +28,8 @@ interface GameInit {
   mode: "solo" | "multi";
   pseudo: string;
   seed?: number;
+  /** Room id for a multi run (used for room-scoped scoring later). */
+  roomId?: string;
 }
 
 interface ObstaclePair {
@@ -56,6 +58,7 @@ export class GameScene extends Phaser.Scene {
   private mode: GameInit["mode"] = "solo";
   private pseudo = "Anonyme";
   private seed = 0;
+  private roomId?: string;
 
   private rng!: Rng;
   private music = new MusicBed();
@@ -155,6 +158,7 @@ export class GameScene extends Phaser.Scene {
     this.mode = data.mode ?? "solo";
     this.pseudo = data.pseudo ?? "Anonyme";
     this.seed = data.seed ?? randomSeed();
+    this.roomId = data.roomId;
   }
 
   create(): void {
@@ -1158,6 +1162,7 @@ export class GameScene extends Phaser.Scene {
         mode: this.mode,
         pseudo: this.pseudo,
         seed: this.seed,
+        roomId: this.roomId,
       });
     });
   }

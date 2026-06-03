@@ -8,6 +8,7 @@ interface GameOverInit {
   mode: "solo" | "multi";
   pseudo: string;
   seed: number;
+  roomId?: string;
 }
 
 const TITLE_FONT = "Luckiest Guy, sans-serif";
@@ -97,6 +98,7 @@ export class GameOverScene extends Phaser.Scene {
       player_name: this.result.pseudo,
       score: this.result.score,
       mode: this.result.mode,
+      room_code: this.result.roomId ?? null,
     }).then((row) => {
       if (!this.scene.isActive()) return;
       if (row) {
