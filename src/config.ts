@@ -136,6 +136,11 @@ export const QUIZ = {
   /** After resuming, the bird hovers (gravity off) this long so it doesn't drop while the
    *  player re-orients; the first flap ends the grace early (ms). */
   graceMs: 1400,
+  /** Multiplayer SYNCHRONIZED quiz timings (everyone faces the same question together, so the
+   *  flow is fixed-duration and stays in sync). Answer window, then the correct-answer reveal,
+   *  then a 3-2-1 before resuming. Solo stays self-paced (a "Continuer" button instead). */
+  answerMs: 15000,
+  revealMs: 10000,
 } as const;
 
 /**

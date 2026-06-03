@@ -1,4 +1,5 @@
 import { STORAGE } from "../config";
+import type { Rng } from "./Rng";
 
 export type Difficulty = "facile" | "moyen" | "difficile";
 
@@ -35,10 +36,14 @@ export interface QuizDraw {
 export class QuestionManager {
   private readonly all: Question[];
   private seen: Set<string>;
+  /** When set (multiplayer), draws + shuffles are DETERMINISTIC so every client sharing the
+   *  seed sees the identical question + option order. No localStorage persistence in this mode. */
+  private readonly rng?: Rng;
 
-  constructor(questions: Question[]) {
+  constructor(questions: Question[], rng?: Rng) {
     this.all = questions;
-    this.seen = this.loadSeen();
+    this.rng = rng;
+    this.seen = rng ? new Set() : this.loadSeen();
   }
 
   next(_score: number): QuizDraw {
@@ -49,9 +54,9 @@ export class QuestionManager {
     if (this.seen.size >= this.all.length) this.seen.clear();
 
     const pool = this.all.filter((q) => !this.seen.has(q.id));
-    const q = pool[Math.floor(Math.random() * pool.length)];
+    const q = pool[this.randInt(pool.length)];
     this.seen.add(q.id);
-    this.persist();
+    if (!this.rng) this.persist();
 
     return {
       id: q.id,
@@ -60,6 +65,11 @@ export class QuestionManager {
       answer: q.answer,
       explanation: q.explanation,
     };
+  }
+
+  /** Integer in [0, n) — seeded in multiplayer, Math.random otherwise. */
+  private randInt(n: number): number {
+    return this.rng ? this.rng.int(0, n - 1) : Math.floor(Math.random() * n);
   }
 
   /** Load persisted seen-ids, dropping any that no longer exist in the bank. */
@@ -88,7 +98,7 @@ export class QuestionManager {
   private shuffle(items: string[]): string[] {
     const out = items.slice();
     for (let i = out.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
+      const j = this.randInt(i + 1);
       [out[i], out[j]] = [out[j], out[i]];
     }
     return out;

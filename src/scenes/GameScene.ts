@@ -214,8 +214,13 @@ export class GameScene extends Phaser.Scene {
     this.countdownActive = false;
     this.multiEnded = false;
     this.rng = new Rng(this.seed);
+    // In multiplayer, seed the question stream too (from the shared seed, but a separate
+    // sub-seed so it doesn't consume the obstacle RNG) → everyone gets the SAME questions in
+    // the same order with the same option layout (needed for the synchronized quiz + fair scores).
+    const questionRng = this.mode === "multi" ? new Rng((this.seed ^ 0x9e3779b9) >>> 0) : undefined;
     this.questions = new QuestionManager(
       (this.cache.json.get("questions") as Question[]) ?? [],
+      questionRng,
     );
 
     this.drawBackground();
@@ -286,6 +291,7 @@ export class GameScene extends Phaser.Scene {
     this.room.setHandlers({
       onPresence: (m) => this.onGhostPresence(m),
       onPosition: (p) => this.onGhostPosition(p),
+      onPick: (p) => this.forwardPick(p),
       onResult: (r) => this.onGhostResult(r),
     });
     // Broadcast our position ~12 times/sec for the ghosts + live scoreboard.
@@ -375,6 +381,12 @@ export class GameScene extends Phaser.Scene {
   private onGhostResult(r: RoomResult): void {
     this.results.set(r.id, { pseudo: r.pseudo, score: r.score, finished: true });
     if (this.multiEnded) this.renderScoreboard();
+  }
+
+  /** Forward a remote player's quiz pick to the (active) QuizScene overlay. */
+  private forwardPick(p: { id: string; pseudo: string; option: string }): void {
+    if (!this.quizActive) return;
+    this.scene.get(SCENES.Quiz)?.events.emit("remotePick", p);
   }
 
   /** Smoothly move ghosts toward their last broadcast y; called from update(). */
@@ -1096,6 +1108,12 @@ export class GameScene extends Phaser.Scene {
     this.scene.launch(SCENES.Quiz, {
       question,
       onResolved: (correct: boolean) => this.onQuizResolved(correct),
+      // Multiplayer: the quiz is a SYNCHRONIZED, timed shared moment with everyone's picks shown.
+      timed: this.mode === "multi",
+      broadcastPick:
+        this.mode === "multi"
+          ? (option: string) => this.room?.broadcastPick({ pseudo: this.pseudo, option })
+          : undefined,
     });
   }
 
