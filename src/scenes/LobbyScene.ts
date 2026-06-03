@@ -43,7 +43,6 @@ export class LobbyScene extends Phaser.Scene {
   private roomRow: RoomRow | null = null;
   private members: RoomMember[] = [];
   private isAdmin = false;
-  private seed: number | null = null;
   private starting = false;
   private mode: "browse" | "create" | "join" | "room" = "browse";
 
@@ -59,7 +58,6 @@ export class LobbyScene extends Phaser.Scene {
     this.roomRow = null;
     this.members = [];
     this.isAdmin = false;
-    this.seed = null;
     this.starting = false;
     this.unsubRooms = () => {};
   }
@@ -351,10 +349,8 @@ export class LobbyScene extends Phaser.Scene {
   private joinChannel(row: RoomRow): void {
     this.room = joinRoom(row.id, this.pseudo, {
       onPresence: (m) => this.onPresence(m),
-      onSeed: (s) => {
-        this.seed = s;
-      },
-      onCountdown: (n) => this.onCountdown(n),
+      // Admin pressed start: jump to the game screen with the shared seed (countdown plays there).
+      onStart: (s) => this.startGame(s),
     });
   }
 
@@ -415,65 +411,22 @@ export class LobbyScene extends Phaser.Scene {
   private adminStart(): void {
     if (!this.isAdmin || !this.roomRow) return;
     const seed = randomSeed();
-    this.seed = seed;
-    this.room?.broadcastSeed(seed);
     void setRoomStatus(this.roomRow.id, "started");
-    this.startCountdown();
+    this.room?.broadcastStart(seed); // tell everyone to go to the game screen
+    this.startGame(seed);
   }
 
-  private startCountdown(): void {
-    let n = 3;
-    const tick = () => {
-      if (!this.scene.isActive()) return;
-      this.room?.broadcastCountdown(n);
-      this.showCountdown(n);
-      if (n <= 0) {
-        this.startGame();
-        return;
-      }
-      n -= 1;
-      this.time.delayedCall(900, tick);
-    };
-    tick();
-  }
-
-  private onCountdown(n: number): void {
-    if (this.mode !== "room") return;
-    this.showCountdown(n);
-    if (n <= 0) this.startGame();
-  }
-
-  private showCountdown(n: number): void {
-    const existing = this.view.find((o) => o.getData?.("count")) as
-      | Phaser.GameObjects.Text
-      | undefined;
-    const label = n <= 0 ? "GO !" : String(n);
-    if (existing) {
-      existing.setText(label);
-    } else {
-      const t = this.add
-        .text(GAME.width / 2, GAME.height * 0.55, label, {
-          fontFamily: TITLE_FONT,
-          fontSize: "80px",
-          color: "#ffd23f",
-        })
-        .setOrigin(0.5)
-        .setStroke("#1d2b53", 8)
-        .setDepth(20);
-      t.setData("count", true);
-      this.view.push(t);
-    }
-  }
-
-  private startGame(): void {
+  /** Hand the live room channel to the GameScene; the 3-2-1 countdown plays there. */
+  private startGame(seed: number): void {
     if (this.starting) return;
     this.starting = true;
     this.unsubRooms();
     this.scene.start(SCENES.Game, {
       mode: "multi",
       pseudo: this.pseudo,
-      seed: this.seed ?? randomSeed(),
+      seed,
       roomId: this.roomRow?.id,
+      room: this.room ?? undefined,
     });
   }
 
@@ -483,7 +436,6 @@ export class LobbyScene extends Phaser.Scene {
     if (this.isAdmin && this.roomRow) void setRoomStatus(this.roomRow.id, "closed");
     this.roomRow = null;
     this.isAdmin = false;
-    this.seed = null;
     this.showBrowse();
   }
 

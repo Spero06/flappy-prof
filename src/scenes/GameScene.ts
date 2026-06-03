@@ -23,6 +23,7 @@ import { Rng, randomSeed } from "../systems/Rng";
 import { QuestionManager, type Question } from "../systems/QuestionManager";
 import { audio } from "../systems/AudioManager";
 import { MusicBed } from "../systems/MusicBed";
+import type { GhostPosition, RoomHandle, RoomMember, RoomResult } from "../systems/Net";
 
 interface GameInit {
   mode: "solo" | "multi";
@@ -30,6 +31,18 @@ interface GameInit {
   seed?: number;
   /** Room id for a multi run (used for room-scoped scoring later). */
   roomId?: string;
+  /** Live Realtime room handle, handed over from the lobby (multi only). */
+  room?: RoomHandle;
+}
+
+/** A remote player rendered as a low-opacity ghost (multi). */
+interface Ghost {
+  sprite: Phaser.GameObjects.Image;
+  label: Phaser.GameObjects.Text;
+  targetY: number;
+  pseudo: string;
+  score: number;
+  alive: boolean;
 }
 
 interface ObstaclePair {
@@ -59,6 +72,13 @@ export class GameScene extends Phaser.Scene {
   private pseudo = "Anonyme";
   private seed = 0;
   private roomId?: string;
+
+  // Multiplayer (ghost mode).
+  private room: RoomHandle | null = null;
+  private ghosts = new Map<string, Ghost>();
+  private results = new Map<string, { pseudo: string; score: number; finished: boolean }>();
+  private countdownActive = false;
+  private multiEnded = false;
 
   private rng!: Rng;
   private music = new MusicBed();
@@ -159,6 +179,7 @@ export class GameScene extends Phaser.Scene {
     this.pseudo = data.pseudo ?? "Anonyme";
     this.seed = data.seed ?? randomSeed();
     this.roomId = data.roomId;
+    this.room = data.room ?? null;
   }
 
   create(): void {
@@ -188,6 +209,10 @@ export class GameScene extends Phaser.Scene {
     this.audioRate = 1;
     this.aura = undefined;
     this.magnetRing = undefined;
+    this.ghosts.clear();
+    this.results.clear();
+    this.countdownActive = false;
+    this.multiEnded = false;
     this.rng = new Rng(this.seed);
     this.questions = new QuestionManager(
       (this.cache.json.get("questions") as Question[]) ?? [],
@@ -228,22 +253,136 @@ export class GameScene extends Phaser.Scene {
       this.music.setRate(1);
       audio.setRate(1);
       this.music.pause();
+      this.room?.leave();
     });
 
-    // Multiplayer is synced to the lobby countdown, so the run must begin for EVERYONE the
-    // moment the scene starts — not wait for each player's first tap (which desyncs them).
-    // Solo keeps the "tap to start" prompt.
-    if (this.mode === "multi") this.autoStart();
-    else this.createStartPrompt();
+    // Multiplayer: a 3-2-1 countdown plays ON the game screen (everyone is already here, ready),
+    // then the run auto-starts for all. Solo keeps the "tap to start" prompt.
+    if (this.mode === "multi") {
+      this.setupMulti();
+      this.startMultiCountdown();
+    } else {
+      this.createStartPrompt();
+    }
   }
 
-  /** Begin the run immediately (multiplayer): start the world + a free initial flap so the
-   *  bird is aloft and identical across clients, instead of waiting for a tap. */
+  /** Begin the run immediately: start the world + a free initial flap so the bird is aloft and
+   *  identical across clients, instead of waiting for a tap. */
   private autoStart(): void {
     audio.unlock();
     this.startRun();
     this.birdBody.setVelocityY(-PHYSICS.flapVelocity);
     audio.play("flap");
+  }
+
+  // ---------------------------------------------------------------------------
+  // Multiplayer (ghost mode)
+  // ---------------------------------------------------------------------------
+
+  /** Take over the room channel from the lobby + start the ~12 Hz position broadcast. */
+  private setupMulti(): void {
+    if (!this.room) return;
+    this.results.set("self", { pseudo: this.pseudo, score: 0, finished: false });
+    this.room.setHandlers({
+      onPresence: (m) => this.onGhostPresence(m),
+      onPosition: (p) => this.onGhostPosition(p),
+      onResult: (r) => this.onGhostResult(r),
+    });
+    // Broadcast our position ~12 times/sec for the ghosts + live scoreboard.
+    this.time.addEvent({
+      delay: 83,
+      loop: true,
+      callback: () => {
+        if (!this.started || !this.room) return;
+        this.room.broadcastPosition({
+          y: this.bird.y,
+          alive: !this.gameOver,
+          score: this.score,
+          pseudo: this.pseudo,
+        });
+      },
+    });
+  }
+
+  /** On-screen 3-2-1-GO, then auto-start the run (everyone is already on the game screen). */
+  private startMultiCountdown(): void {
+    this.countdownActive = true;
+    const cx = GAME.width / 2;
+    const num = this.add
+      .text(cx, GAME.height * 0.42, "3", {
+        fontFamily: TITLE_FONT,
+        fontSize: "120px",
+        color: "#ffd23f",
+      })
+      .setOrigin(0.5)
+      .setStroke("#1d2b53", 10)
+      .setDepth(30);
+    const pump = (label: string) => {
+      num.setText(label).setScale(1.6);
+      this.tweens.add({ targets: num, scale: 1, duration: 350, ease: "Back.Out" });
+    };
+    pump("3");
+    const steps = ["2", "1", "GO !"];
+    steps.forEach((label, i) => {
+      this.time.delayedCall(800 * (i + 1), () => pump(label));
+    });
+    this.time.delayedCall(800 * steps.length + 300, () => {
+      num.destroy();
+      this.countdownActive = false;
+      this.autoStart();
+    });
+  }
+
+  private onGhostPresence(members: RoomMember[]): void {
+    const ids = new Set(members.map((m) => m.id));
+    for (const [id, ghost] of this.ghosts) {
+      if (!ids.has(id)) {
+        ghost.sprite.destroy();
+        ghost.label.destroy();
+        this.ghosts.delete(id);
+        this.results.delete(id);
+      }
+    }
+  }
+
+  private onGhostPosition(p: GhostPosition): void {
+    let ghost = this.ghosts.get(p.id);
+    if (!ghost) {
+      const sprite = this.add
+        .image(GAME.width * PHYSICS.birdX, p.y, "bird")
+        .setAlpha(0.4)
+        .setTint(0x9fd0ff)
+        .setDepth(1);
+      const label = this.add
+        .text(GAME.width * PHYSICS.birdX, p.y - 24, p.pseudo, {
+          fontFamily: UI_FONT,
+          fontSize: "12px",
+          color: "#cfe6ff",
+        })
+        .setOrigin(0.5)
+        .setAlpha(0.7)
+        .setDepth(1);
+      ghost = { sprite, label, targetY: p.y, pseudo: p.pseudo, score: p.score, alive: p.alive };
+      this.ghosts.set(p.id, ghost);
+    }
+    ghost.targetY = p.y;
+    ghost.score = p.score;
+    ghost.alive = p.alive;
+    ghost.sprite.setAlpha(p.alive ? 0.4 : 0.18);
+    this.results.set(p.id, { pseudo: p.pseudo, score: p.score, finished: !p.alive });
+  }
+
+  private onGhostResult(r: RoomResult): void {
+    this.results.set(r.id, { pseudo: r.pseudo, score: r.score, finished: true });
+    if (this.multiEnded) this.renderScoreboard();
+  }
+
+  /** Smoothly move ghosts toward their last broadcast y; called from update(). */
+  private updateGhosts(): void {
+    for (const ghost of this.ghosts.values()) {
+      ghost.sprite.y = Phaser.Math.Linear(ghost.sprite.y, ghost.targetY, 0.25);
+      ghost.label.y = ghost.sprite.y - 24;
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -324,7 +463,8 @@ export class GameScene extends Phaser.Scene {
       .setStroke("#1d2b53", 5);
     this.updateLivesHud();
 
-    this.createPauseButton();
+    // No manual pause in a live multiplayer race (it would desync / let you cheat-think).
+    if (this.mode !== "multi") this.createPauseButton();
   }
 
   private createPauseButton(): void {
@@ -423,6 +563,7 @@ export class GameScene extends Phaser.Scene {
   }
 
   private openPause(): void {
+    if (this.mode === "multi") return; // no pausing a live race
     // Works even before the first flap so you can set the volume before playing.
     if (this.gameOver || this.quizActive || this.graceUntil > 0) return;
     if (this.scene.isPaused()) return;
@@ -443,7 +584,7 @@ export class GameScene extends Phaser.Scene {
   // ---------------------------------------------------------------------------
 
   private flap(): void {
-    if (this.gameOver || this.quizActive) return;
+    if (this.gameOver || this.quizActive || this.countdownActive) return;
     audio.unlock();
 
     if (!this.started) this.startRun();
@@ -699,6 +840,7 @@ export class GameScene extends Phaser.Scene {
     this.bird.angle = Phaser.Math.Linear(this.bird.angle, targetAngle, 0.15);
 
     if (this.shieldRing) this.shieldRing.setPosition(this.bird.x, this.bird.y);
+    if (this.mode === "multi") this.updateGhosts();
 
     // Floor / ceiling: counts as a crash (costs a life), then recenter so we don't double-hit.
     // Invincibility (or the post-crash invuln window) just clamps the bird inside the area.
@@ -1170,6 +1312,16 @@ export class GameScene extends Phaser.Scene {
     this.cameras.main.shake(220, 0.012);
     this.cameras.main.flash(160, 255, 80, 80);
 
+    if (this.mode === "multi") {
+      // Multiplayer scores are EPHEMERAL — never written to the DB. Broadcast our final score
+      // and show the live room scoreboard (top 5) in-scene.
+      this.multiEnded = true;
+      this.results.set("self", { pseudo: this.pseudo, score: this.score, finished: true });
+      this.room?.broadcastResult({ pseudo: this.pseudo, score: this.score });
+      this.time.delayedCall(650, () => this.showMultiResults());
+      return;
+    }
+
     this.time.delayedCall(650, () => {
       this.scene.start(SCENES.GameOver, {
         score: this.score,
@@ -1179,5 +1331,83 @@ export class GameScene extends Phaser.Scene {
         roomId: this.roomId,
       });
     });
+  }
+
+  // --- Multiplayer results (ephemeral room scoreboard) -----------------------
+
+  private scoreboardText?: Phaser.GameObjects.Text;
+
+  private showMultiResults(): void {
+    const cx = GAME.width / 2;
+    this.add.rectangle(0, 0, GAME.width, GAME.height, 0x0a0f24, 0.9).setOrigin(0).setDepth(40);
+    this.add
+      .text(cx, GAME.height * 0.16, "Résultats", {
+        fontFamily: TITLE_FONT,
+        fontSize: "44px",
+        color: "#ffd23f",
+      })
+      .setOrigin(0.5)
+      .setDepth(41)
+      .setStroke("#1d2b53", 7);
+
+    this.scoreboardText = this.add
+      .text(cx, GAME.height * 0.3, "", {
+        fontFamily: UI_FONT,
+        fontSize: "22px",
+        color: "#ffffff",
+        align: "left",
+        fontStyle: "600",
+        lineSpacing: 12,
+      })
+      .setOrigin(0.5, 0)
+      .setDepth(41);
+    this.renderScoreboard();
+
+    // Keep refreshing while other players are still finishing.
+    this.time.addEvent({ delay: 500, loop: true, callback: () => this.renderScoreboard() });
+
+    this.resultButton(cx, GAME.height * 0.82, "🏠  Salons", 0x2fa84f, 0x43c463, () => {
+      this.scene.start(SCENES.Lobby, { pseudo: this.pseudo });
+    });
+    this.resultButton(cx, GAME.height * 0.91, "Menu", 0x3f6fd1, 0x5a8dee, () => {
+      this.scene.start(SCENES.Menu);
+    });
+  }
+
+  private renderScoreboard(): void {
+    if (!this.scoreboardText) return;
+    const entries = [...this.results.values()].sort((a, b) => b.score - a.score).slice(0, 5);
+    const medals = ["🥇", "🥈", "🥉", "4.", "5."];
+    const lines = entries.map((e, i) => {
+      const tag = e.finished ? "" : "  …";
+      const me = e.pseudo === this.pseudo ? "  (toi)" : "";
+      return `${medals[i]}  ${e.pseudo}${me} — ${e.score}${tag}`;
+    });
+    this.scoreboardText.setText(lines.join("\n") || "—");
+  }
+
+  private resultButton(
+    cx: number,
+    cy: number,
+    label: string,
+    colorBottom: number,
+    colorTop: number,
+    onClick: () => void,
+  ): void {
+    const width = GAME.width * 0.6;
+    const height = 50;
+    const c = this.add.container(cx, cy).setDepth(41);
+    const bg = this.add.graphics();
+    bg.fillStyle(0x000000, 0.25);
+    bg.fillRoundedRect(-width / 2, -height / 2 + 4, width, height, 15);
+    bg.fillGradientStyle(colorTop, colorTop, colorBottom, colorBottom, 1);
+    bg.fillRoundedRect(-width / 2, -height / 2, width, height, 15);
+    const t = this.add
+      .text(0, 0, label, { fontFamily: UI_FONT, fontSize: "21px", color: "#ffffff", fontStyle: "600" })
+      .setOrigin(0.5);
+    c.add([bg, t]);
+    c.setSize(width, height);
+    c.setInteractive({ useHandCursor: true });
+    c.on("pointerup", onClick);
   }
 }

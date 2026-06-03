@@ -144,11 +144,20 @@ export interface GhostPosition {
   score: number;
 }
 
+export interface RoomResult {
+  id: string;
+  pseudo: string;
+  score: number;
+}
+
 export interface RoomHandlers {
   onPresence?: (members: RoomMember[]) => void;
   onSeed?: (seed: number) => void;
-  onCountdown?: (n: number) => void;
+  /** Admin pressed start: everyone moves to the game screen with this seed. */
+  onStart?: (seed: number) => void;
   onPosition?: (pos: GhostPosition) => void;
+  /** A player finished — their final score for the ephemeral room scoreboard. */
+  onResult?: (result: RoomResult) => void;
 }
 
 export interface RoomHandle {
@@ -156,9 +165,12 @@ export interface RoomHandle {
   id: string;
   /** True if this client is the earliest-joined member (used to elect the seed host). */
   isHost(): boolean;
+  /** Swap the handlers (e.g. the GameScene takes over from the LobbyScene). */
+  setHandlers(handlers: RoomHandlers): void;
   broadcastSeed(seed: number): void;
-  broadcastCountdown(n: number): void;
+  broadcastStart(seed: number): void;
   broadcastPosition(p: { y: number; alive: boolean; score: number; pseudo: string }): void;
+  broadcastResult(r: { pseudo: string; score: number }): void;
   leave(): void;
 }
 
@@ -177,6 +189,8 @@ export function joinRoom(
 
   const id = `p_${Math.random().toString(36).slice(2, 10)}`;
   const joinedAt = Date.now();
+  // Handlers are mutable so the GameScene can take over from the LobbyScene mid-session.
+  let h = handlers;
   const channel = c.channel(`room:${roomCode.toUpperCase()}`, {
     config: { presence: { key: id }, broadcast: { self: false } },
   });
@@ -190,16 +204,19 @@ export function joinRoom(
       id: key,
       pseudo: metas[0]?.pseudo ?? "Anonyme",
     }));
-    handlers.onPresence?.(members);
+    h.onPresence?.(members);
   });
   channel.on("broadcast", { event: "seed" }, ({ payload }) =>
-    handlers.onSeed?.((payload as { seed: number }).seed),
+    h.onSeed?.((payload as { seed: number }).seed),
   );
-  channel.on("broadcast", { event: "countdown" }, ({ payload }) =>
-    handlers.onCountdown?.((payload as { n: number }).n),
+  channel.on("broadcast", { event: "start" }, ({ payload }) =>
+    h.onStart?.((payload as { seed: number }).seed),
   );
   channel.on("broadcast", { event: "position" }, ({ payload }) =>
-    handlers.onPosition?.(payload as GhostPosition),
+    h.onPosition?.(payload as GhostPosition),
+  );
+  channel.on("broadcast", { event: "result" }, ({ payload }) =>
+    h.onResult?.(payload as RoomResult),
   );
 
   channel.subscribe((status) => {
@@ -227,9 +244,13 @@ export function joinRoom(
       }
       return hostKey === id;
     },
+    setHandlers: (next) => {
+      h = next;
+    },
     broadcastSeed: (seed) => send("seed", { seed }),
-    broadcastCountdown: (n) => send("countdown", { n }),
+    broadcastStart: (seed) => send("start", { seed }),
     broadcastPosition: (p) => send("position", { id, ...p }),
+    broadcastResult: (r) => send("result", { id, ...r }),
     leave: () => {
       void channel.untrack();
       void c.removeChannel(channel);
