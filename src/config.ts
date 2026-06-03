@@ -29,7 +29,30 @@ export const STORAGE = {
 } as const;
 
 /** Default master volume (0..1) if the player hasn't set one yet. */
-export const DEFAULT_VOLUME = 0.7;
+export const DEFAULT_VOLUME = 0.5;
+
+/** Read the saved master volume, falling back to DEFAULT_VOLUME when unset/invalid.
+ *  (Guards the `Number(null) === 0` trap that otherwise started the game silent.) */
+export function loadVolume(): number {
+  try {
+    const raw = localStorage.getItem(STORAGE.volume);
+    if (raw !== null) {
+      const n = Number(raw);
+      if (Number.isFinite(n)) return Math.max(0, Math.min(1, n));
+    }
+  } catch {
+    // storage unavailable
+  }
+  return DEFAULT_VOLUME;
+}
+
+export function saveVolume(volume: number): void {
+  try {
+    localStorage.setItem(STORAGE.volume, String(Math.max(0, Math.min(1, volume))));
+  } catch {
+    // storage unavailable; in-memory volume still applies for this session
+  }
+}
 
 /**
  * Gameplay tunables, expressed in design-space pixels (GAME.width x GAME.height).

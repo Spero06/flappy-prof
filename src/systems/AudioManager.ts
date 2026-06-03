@@ -12,6 +12,8 @@
  *   until the matching clip is recorded.
  */
 
+import { loadVolume } from "../config";
+
 type Manifest = Record<string, string[]>;
 
 interface Blip {
@@ -51,6 +53,7 @@ class AudioManager {
   init(manifest: Manifest): void {
     this.manifest = manifest ?? {};
     this.ensureContext();
+    this.setMasterVolume(loadVolume());
     void this.preload();
   }
 

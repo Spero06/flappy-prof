@@ -15,8 +15,9 @@ import {
   SCORE_PER_PASS,
   SEGMENTS,
   SHIELD,
-  STORAGE,
   DEFAULT_VOLUME,
+  loadVolume,
+  saveVolume,
 } from "../config";
 import { Rng, randomSeed } from "../systems/Rng";
 import { QuestionManager, type Question } from "../systems/QuestionManager";
@@ -217,8 +218,7 @@ export class GameScene extends Phaser.Scene {
     this.bindInput();
 
     // Apply the saved master volume to both audio systems.
-    const stored = Number(localStorage.getItem(STORAGE.volume));
-    this.setVolume(Number.isFinite(stored) ? stored : DEFAULT_VOLUME);
+    this.setVolume(loadVolume());
 
     // Make sure the music loop is torn down (and pitch reset) when the scene ends.
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
@@ -405,7 +405,8 @@ export class GameScene extends Phaser.Scene {
   }
 
   private openPause(): void {
-    if (!this.started || this.gameOver || this.quizActive || this.graceUntil > 0) return;
+    // Works even before the first flap so you can set the volume before playing.
+    if (this.gameOver || this.quizActive || this.graceUntil > 0) return;
     if (this.scene.isPaused()) return;
     this.scene.launch(SCENES.Pause, { volume: this.volume });
     this.scene.pause();
@@ -416,7 +417,7 @@ export class GameScene extends Phaser.Scene {
     this.volume = Phaser.Math.Clamp(v, 0, 1);
     this.music.setMasterVolume(this.volume);
     audio.setMasterVolume(this.volume);
-    localStorage.setItem(STORAGE.volume, String(this.volume));
+    saveVolume(this.volume);
   }
 
   // ---------------------------------------------------------------------------

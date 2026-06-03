@@ -1,5 +1,6 @@
 import Phaser from "phaser";
-import { GAME, SCENES, STORAGE } from "../config";
+import { GAME, SCENES, STORAGE, loadVolume, saveVolume } from "../config";
+import { audio } from "../systems/AudioManager";
 
 const MAX_PSEUDO = 24;
 
@@ -53,13 +54,49 @@ export class MenuScene extends Phaser.Scene {
     this.drawBackground();
     this.createDriftingBackground();
 
-    this.createTitle(cx, GAME.height * 0.16);
-    this.createHeroBird(cx, GAME.height * 0.34);
-    this.createCard(cx, GAME.height * 0.6);
-    this.createButton(cx, GAME.height * 0.82, GAME.width * 0.62, "🏆  Classement", 0xd9912a, 0xf0b048, () =>
+    this.createTitle(cx, GAME.height * 0.15);
+    this.createHeroBird(cx, GAME.height * 0.32);
+    this.createCard(cx, GAME.height * 0.57);
+    this.createButton(cx, GAME.height * 0.77, GAME.width * 0.62, "🏆  Classement", 0xd9912a, 0xf0b048, () =>
       this.scene.start(SCENES.Leaderboard),
     );
-    this.createFooterHint(cx, GAME.height * 0.93);
+    this.createVolumeControl(cx, GAME.height * 0.88);
+    this.createFooterHint(cx, GAME.height * 0.95);
+  }
+
+  /** Master-volume slider on the menu, so the level can be set BEFORE playing (persisted). */
+  private createVolumeControl(cx: number, cy: number): void {
+    const startVol = Math.round(loadVolume() * 100);
+
+    const label = this.add
+      .text(cx, cy - 22, `🔊  Volume ${startVol}%`, {
+        fontFamily: UI_FONT,
+        fontSize: "16px",
+        color: "#cdd6f4",
+        fontStyle: "600",
+      })
+      .setOrigin(0.5)
+      .setDepth(2);
+
+    const element = this.add.dom(cx, cy + 6).createFromHTML(
+      `<input type="range" min="0" max="100" value="${startVol}" step="1"
+        style="width: 240px; accent-color: #ffd23f; cursor: pointer;" />`,
+    );
+    element.setDepth(2);
+    const slider = element.node.querySelector("input") as HTMLInputElement;
+
+    slider.addEventListener("input", () => {
+      const pct = Number(slider.value);
+      label.setText(`🔊  Volume ${pct}%`);
+      audio.unlock();
+      audio.setMasterVolume(pct / 100);
+      saveVolume(pct / 100);
+    });
+    // Play a short "benn" when released so the player hears the chosen level.
+    slider.addEventListener("change", () => {
+      audio.unlock();
+      audio.play("flap");
+    });
   }
 
   // ---------------------------------------------------------------------------
