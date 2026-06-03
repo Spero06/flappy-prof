@@ -9,6 +9,8 @@ interface QuizInit {
   timed?: boolean;
   /** Multiplayer: broadcast this client's pick so others see it. */
   broadcastPick?: (option: string) => void;
+  /** Multiplayer: picks that arrived before this quiz opened (entry-skew buffer). */
+  initialPicks?: { pseudo: string; option: string }[];
 }
 
 const TITLE_FONT = "Luckiest Guy, sans-serif";
@@ -38,6 +40,7 @@ export class QuizScene extends Phaser.Scene {
   private picked: string | null = null;
   private buttons: OptBtn[] = [];
   private optionPicks = new Map<string, string[]>();
+  private initialPicks: { pseudo: string; option: string }[] = [];
 
   constructor() {
     super(SCENES.Quiz);
@@ -48,6 +51,7 @@ export class QuizScene extends Phaser.Scene {
     this.onResolved = data.onResolved;
     this.timed = data.timed ?? false;
     this.broadcastPick = data.broadcastPick;
+    this.initialPicks = data.initialPicks ?? [];
     this.answered = false;
     this.picked = null;
     this.buttons = [];
@@ -101,6 +105,8 @@ export class QuizScene extends Phaser.Scene {
       this.events.on("remotePick", (p: { pseudo: string; option: string }) =>
         this.addPick(p.pseudo, p.option),
       );
+      // Apply picks that arrived before this quiz opened (entry skew).
+      for (const p of this.initialPicks) this.addPick(p.pseudo, p.option);
       this.startAnswerTimer();
     }
   }

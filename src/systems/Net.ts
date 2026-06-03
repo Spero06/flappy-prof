@@ -157,7 +157,7 @@ export interface RoomHandlers {
   onStart?: (seed: number) => void;
   onPosition?: (pos: GhostPosition) => void;
   /** A player picked a quiz option (synchronized multiplayer quiz). */
-  onPick?: (p: { id: string; pseudo: string; option: string }) => void;
+  onPick?: (p: { id: string; pseudo: string; option: string; questionId: string }) => void;
   /** A player finished — their final score for the ephemeral room scoreboard. */
   onResult?: (result: RoomResult) => void;
 }
@@ -172,7 +172,7 @@ export interface RoomHandle {
   broadcastSeed(seed: number): void;
   broadcastStart(seed: number): void;
   broadcastPosition(p: { y: number; alive: boolean; score: number; pseudo: string }): void;
-  broadcastPick(p: { pseudo: string; option: string }): void;
+  broadcastPick(p: { pseudo: string; option: string; questionId: string }): void;
   broadcastResult(r: { pseudo: string; score: number }): void;
   leave(): void;
 }
@@ -219,7 +219,7 @@ export function joinRoom(
     h.onPosition?.(payload as GhostPosition),
   );
   channel.on("broadcast", { event: "pick" }, ({ payload }) =>
-    h.onPick?.(payload as { id: string; pseudo: string; option: string }),
+    h.onPick?.(payload as { id: string; pseudo: string; option: string; questionId: string }),
   );
   channel.on("broadcast", { event: "result" }, ({ payload }) =>
     h.onResult?.(payload as RoomResult),

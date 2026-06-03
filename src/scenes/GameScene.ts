@@ -79,6 +79,10 @@ export class GameScene extends Phaser.Scene {
   private results = new Map<string, { pseudo: string; score: number; finished: boolean }>();
   private countdownActive = false;
   private multiEnded = false;
+  /** Picks that arrived before the local quiz for that question opened (entry-skew buffer). */
+  private pendingPicks = new Map<string, { pseudo: string; option: string }[]>();
+  private currentQuestionId: string | null = null;
+  private posInterval?: number;
 
   private rng!: Rng;
   private music = new MusicBed();
@@ -211,6 +215,8 @@ export class GameScene extends Phaser.Scene {
     this.magnetRing = undefined;
     this.ghosts.clear();
     this.results.clear();
+    this.pendingPicks.clear();
+    this.currentQuestionId = null;
     this.countdownActive = false;
     this.multiEnded = false;
     this.rng = new Rng(this.seed);
@@ -258,6 +264,7 @@ export class GameScene extends Phaser.Scene {
       this.music.setRate(1);
       audio.setRate(1);
       this.music.pause();
+      this.stopPosBroadcast();
       this.room?.leave();
     });
 
@@ -294,20 +301,25 @@ export class GameScene extends Phaser.Scene {
       onPick: (p) => this.forwardPick(p),
       onResult: (r) => this.onGhostResult(r),
     });
-    // Broadcast our position ~12 times/sec for the ghosts + live scoreboard.
-    this.time.addEvent({
-      delay: 83,
-      loop: true,
-      callback: () => {
-        if (!this.started || !this.room) return;
-        this.room.broadcastPosition({
-          y: this.bird.y,
-          alive: !this.gameOver,
-          score: this.score,
-          pseudo: this.pseudo,
-        });
-      },
-    });
+    // Broadcast our position ~12×/sec for ghosts + the live scoreboard. Uses a window timer
+    // (NOT a scene timer) so it keeps firing while OUR game is paused for a quiz — otherwise our
+    // ghost would freeze and then jump on everyone else's screen. Stops on death/shutdown.
+    this.posInterval = window.setInterval(() => {
+      if (!this.started || this.gameOver || !this.room) return;
+      this.room.broadcastPosition({
+        y: this.bird.y,
+        alive: true,
+        score: this.score,
+        pseudo: this.pseudo,
+      });
+    }, 83);
+  }
+
+  private stopPosBroadcast(): void {
+    if (this.posInterval !== undefined) {
+      window.clearInterval(this.posInterval);
+      this.posInterval = undefined;
+    }
   }
 
   /** On-screen 3-2-1-GO, then auto-start the run (everyone is already on the game screen). */
@@ -346,7 +358,9 @@ export class GameScene extends Phaser.Scene {
         ghost.sprite.destroy();
         ghost.label.destroy();
         this.ghosts.delete(id);
-        this.results.delete(id);
+        // Keep a player's FINAL result on the board even after they leave (don't erase the
+        // winner as everyone navigates away); only drop still-playing leavers.
+        if (!this.results.get(id)?.finished) this.results.delete(id);
       }
     }
   }
@@ -375,7 +389,11 @@ export class GameScene extends Phaser.Scene {
     ghost.score = p.score;
     ghost.alive = p.alive;
     ghost.sprite.setAlpha(p.alive ? 0.4 : 0.18);
-    this.results.set(p.id, { pseudo: p.pseudo, score: p.score, finished: !p.alive });
+    // Never downgrade a finalized result back to "still playing" (a late position can arrive
+    // after the result broadcast).
+    if (!this.results.get(p.id)?.finished) {
+      this.results.set(p.id, { pseudo: p.pseudo, score: p.score, finished: !p.alive });
+    }
   }
 
   private onGhostResult(r: RoomResult): void {
@@ -383,10 +401,20 @@ export class GameScene extends Phaser.Scene {
     if (this.multiEnded) this.renderScoreboard();
   }
 
-  /** Forward a remote player's quiz pick to the (active) QuizScene overlay. */
-  private forwardPick(p: { id: string; pseudo: string; option: string }): void {
-    if (!this.quizActive) return;
-    this.scene.get(SCENES.Quiz)?.events.emit("remotePick", p);
+  /** Route a remote pick: live to the open quiz if it's for the same question, else buffer it
+   *  (the receiver may not have reached this gate yet — entry skew). */
+  private forwardPick(p: { id: string; pseudo: string; option: string; questionId: string }): void {
+    if (
+      this.quizActive &&
+      p.questionId === this.currentQuestionId &&
+      this.scene.isActive(SCENES.Quiz)
+    ) {
+      this.scene.get(SCENES.Quiz)?.events.emit("remotePick", p);
+      return;
+    }
+    const list = this.pendingPicks.get(p.questionId) ?? [];
+    list.push({ pseudo: p.pseudo, option: p.option });
+    this.pendingPicks.set(p.questionId, list);
   }
 
   /** Smoothly move ghosts toward their last broadcast y; called from update(). */
@@ -1104,21 +1132,28 @@ export class GameScene extends Phaser.Scene {
     audio.play("quiz_start");
     this.music.pause();
     const question = this.questions.next(this.score);
+    this.currentQuestionId = question.id;
+    // Picks for this question that arrived before we opened the quiz (entry skew).
+    const initialPicks = this.pendingPicks.get(question.id) ?? [];
+    this.pendingPicks.delete(question.id);
     this.scene.pause();
     this.scene.launch(SCENES.Quiz, {
       question,
       onResolved: (correct: boolean) => this.onQuizResolved(correct),
       // Multiplayer: the quiz is a SYNCHRONIZED, timed shared moment with everyone's picks shown.
       timed: this.mode === "multi",
+      initialPicks,
       broadcastPick:
         this.mode === "multi"
-          ? (option: string) => this.room?.broadcastPick({ pseudo: this.pseudo, option })
+          ? (option: string) =>
+              this.room?.broadcastPick({ pseudo: this.pseudo, option, questionId: question.id })
           : undefined,
     });
   }
 
   private onQuizResolved(correct: boolean): void {
     this.quizActive = false;
+    this.currentQuestionId = null;
     // Resume the scene first so timers run, but resolve the answer BEFORE resuming the music —
     // a wrong answer on the last life ends the run, and we don't want to restart the loop only
     // to immediately pause it again.
@@ -1334,6 +1369,7 @@ export class GameScene extends Phaser.Scene {
       // Multiplayer scores are EPHEMERAL — never written to the DB. Broadcast our final score
       // and show the live room scoreboard (top 5) in-scene.
       this.multiEnded = true;
+      this.stopPosBroadcast();
       this.results.set("self", { pseudo: this.pseudo, score: this.score, finished: true });
       this.room?.broadcastResult({ pseudo: this.pseudo, score: this.score });
       this.time.delayedCall(650, () => this.showMultiResults());
