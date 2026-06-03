@@ -128,3 +128,111 @@ export function subscribeToScores(onInsert: (row: ScoreRow) => void): () => void
     void c.removeChannel(channel);
   };
 }
+
+// --- Realtime rooms (ghost multiplayer, CLAUDE.md 8.2) -----------------------
+
+export interface RoomMember {
+  id: string;
+  pseudo: string;
+}
+
+export interface GhostPosition {
+  id: string;
+  pseudo: string;
+  y: number;
+  alive: boolean;
+  score: number;
+}
+
+export interface RoomHandlers {
+  onPresence?: (members: RoomMember[]) => void;
+  onSeed?: (seed: number) => void;
+  onCountdown?: (n: number) => void;
+  onPosition?: (pos: GhostPosition) => void;
+}
+
+export interface RoomHandle {
+  /** This client's stable id within the room. */
+  id: string;
+  /** True if this client is the earliest-joined member (used to elect the seed host). */
+  isHost(): boolean;
+  broadcastSeed(seed: number): void;
+  broadcastCountdown(n: number): void;
+  broadcastPosition(p: { y: number; alive: boolean; score: number; pseudo: string }): void;
+  leave(): void;
+}
+
+/**
+ * Join a Realtime room by code (CLAUDE.md 8.2). Presence drives the member list + host
+ * election; Broadcast carries the shared seed, the synced countdown, and ~12 Hz ghost
+ * positions — all ephemeral (no DB writes). Returns null when Supabase is unconfigured.
+ */
+export function joinRoom(
+  roomCode: string,
+  pseudo: string,
+  handlers: RoomHandlers,
+): RoomHandle | null {
+  const c = getClient();
+  if (!c) return null;
+
+  const id = `p_${Math.random().toString(36).slice(2, 10)}`;
+  const joinedAt = Date.now();
+  const channel = c.channel(`room:${roomCode.toUpperCase()}`, {
+    config: { presence: { key: id }, broadcast: { self: false } },
+  });
+
+  channel.on("presence", { event: "sync" }, () => {
+    const state = channel.presenceState() as unknown as Record<
+      string,
+      Array<{ pseudo?: string }>
+    >;
+    const members: RoomMember[] = Object.entries(state).map(([key, metas]) => ({
+      id: key,
+      pseudo: metas[0]?.pseudo ?? "Anonyme",
+    }));
+    handlers.onPresence?.(members);
+  });
+  channel.on("broadcast", { event: "seed" }, ({ payload }) =>
+    handlers.onSeed?.((payload as { seed: number }).seed),
+  );
+  channel.on("broadcast", { event: "countdown" }, ({ payload }) =>
+    handlers.onCountdown?.((payload as { n: number }).n),
+  );
+  channel.on("broadcast", { event: "position" }, ({ payload }) =>
+    handlers.onPosition?.(payload as GhostPosition),
+  );
+
+  channel.subscribe((status) => {
+    if (status === "SUBSCRIBED") void channel.track({ pseudo, joinedAt });
+  });
+
+  const send = (event: string, payload: object) =>
+    void channel.send({ type: "broadcast", event, payload });
+
+  return {
+    id,
+    isHost(): boolean {
+      const state = channel.presenceState() as unknown as Record<
+        string,
+        Array<{ joinedAt?: number }>
+      >;
+      let hostKey = id;
+      let hostJoin = joinedAt;
+      for (const [key, metas] of Object.entries(state)) {
+        const j = metas[0]?.joinedAt ?? Infinity;
+        if (j < hostJoin || (j === hostJoin && key < hostKey)) {
+          hostJoin = j;
+          hostKey = key;
+        }
+      }
+      return hostKey === id;
+    },
+    broadcastSeed: (seed) => send("seed", { seed }),
+    broadcastCountdown: (n) => send("countdown", { n }),
+    broadcastPosition: (p) => send("position", { id, ...p }),
+    leave: () => {
+      void channel.untrack();
+      void c.removeChannel(channel);
+    },
+  };
+}

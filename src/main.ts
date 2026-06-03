@@ -7,6 +7,7 @@ import { GameScene } from "./scenes/GameScene";
 import { QuizScene } from "./scenes/QuizScene";
 import { GameOverScene } from "./scenes/GameOverScene";
 import { LeaderboardScene } from "./scenes/LeaderboardScene";
+import { LobbyScene } from "./scenes/LobbyScene";
 import { PauseScene } from "./scenes/PauseScene";
 
 const config: Phaser.Types.Core.GameConfig = {
@@ -44,6 +45,7 @@ const config: Phaser.Types.Core.GameConfig = {
     QuizScene,
     GameOverScene,
     LeaderboardScene,
+    LobbyScene,
     PauseScene,
   ],
 };

@@ -403,10 +403,15 @@ export class MenuScene extends Phaser.Scene {
     this.createButton(cx, y + 108, w * 0.86, "►  Jouer (solo)", 0x2fa84f, 0x43c463, () =>
       this.startGame("solo"),
     );
-    this.createButton(cx, y + 170, w * 0.86, "Multijoueur", 0x3f6fd1, 0x5a8dee, () => {
-      console.log("[Menu] Multijoueur cliqué (à venir, Faz 6)");
-      this.flashNotice("Bientôt disponible !");
-    });
+    this.createButton(cx, y + 170, w * 0.86, "Multijoueur", 0x3f6fd1, 0x5a8dee, () =>
+      this.openLobby(),
+    );
+  }
+
+  private openLobby(): void {
+    const pseudo = (this.pseudoInput?.value ?? "").trim().slice(0, MAX_PSEUDO) || "Anonyme";
+    localStorage.setItem(STORAGE.pseudo, pseudo);
+    this.scene.start(SCENES.Lobby, { pseudo });
   }
 
   private createFooterHint(cx: number, cy: number): void {
@@ -518,28 +523,6 @@ export class MenuScene extends Phaser.Scene {
     localStorage.setItem(STORAGE.pseudo, pseudo);
     console.log(`[Menu] Démarrage du jeu — mode=${mode}, pseudo=${pseudo}`);
     this.scene.start(SCENES.Game, { mode, pseudo });
-  }
-
-  private flashNotice(message: string): void {
-    const note = this.add
-      .text(GAME.width / 2, GAME.height * 0.84, message, {
-        fontFamily: UI_FONT,
-        fontSize: "20px",
-        color: "#ffd23f",
-        fontStyle: "600",
-      })
-      .setOrigin(0.5)
-      .setAlpha(0)
-      .setDepth(5);
-
-    this.tweens.add({
-      targets: note,
-      alpha: 1,
-      duration: 200,
-      yoyo: true,
-      hold: 900,
-      onComplete: () => note.destroy(),
-    });
   }
 
   private escapeAttr(value: string): string {
