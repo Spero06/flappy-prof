@@ -29,7 +29,7 @@ export const STORAGE = {
 } as const;
 
 /** Default master volume (0..1) if the player hasn't set one yet. */
-export const DEFAULT_VOLUME = 0.5;
+export const DEFAULT_VOLUME = 0.25;
 
 /** Read the saved master volume, falling back to DEFAULT_VOLUME when unset/invalid.
  *  (Guards the `Number(null) === 0` trap that otherwise started the game silent.) */

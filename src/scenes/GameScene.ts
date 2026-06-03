@@ -694,8 +694,13 @@ export class GameScene extends Phaser.Scene {
         else this.loseLife(true);
         return;
       }
+      // Recovering (invuln) or invincible: keep the bird in bounds but DON'T swallow flaps —
+      // only cancel motion heading further INTO the wall, so an upward flap still lifts it off
+      // the floor (otherwise it gets pinned and can't fly up again).
+      const atFloor = this.bird.y >= botLimit;
       this.bird.y = Phaser.Math.Clamp(this.bird.y, topLimit, botLimit);
-      this.birdBody.setVelocityY(0);
+      const vy = this.birdBody.velocity.y;
+      if (atFloor ? vy > 0 : vy < 0) this.birdBody.setVelocityY(0);
     }
 
     // Pillar scoring + recycling.
