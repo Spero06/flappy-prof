@@ -4,7 +4,7 @@
   "pass":         ["audio/pass_01.mp3", "audio/pass_02.mp3", "audio/pass_03.mp3"],
   "pickup":       [],
   "quiz_start":   [],
-  "quiz_correct": [],
+  "quiz_correct": ["audio/quiz_correct_01.mp3"],
   "quiz_wrong":   ["audio/quiz_wrong_01.mp3"],
   "shield":       [],
   "slowmo":       [],
@@ -12,5 +12,5 @@
   "magnet":       [],
   "heart":        [],
   "milestone":    [],
-  "gameover":     []
+  "gameover":     ["audio/gameover_01.mp3"]
 }
