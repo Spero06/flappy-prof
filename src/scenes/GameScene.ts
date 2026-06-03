@@ -218,7 +218,6 @@ export class GameScene extends Phaser.Scene {
 
     this.createHypeFx();
     this.createHud();
-    this.createStartPrompt();
     this.bindInput();
 
     // Apply the saved master volume to both audio systems.
@@ -230,6 +229,21 @@ export class GameScene extends Phaser.Scene {
       audio.setRate(1);
       this.music.pause();
     });
+
+    // Multiplayer is synced to the lobby countdown, so the run must begin for EVERYONE the
+    // moment the scene starts — not wait for each player's first tap (which desyncs them).
+    // Solo keeps the "tap to start" prompt.
+    if (this.mode === "multi") this.autoStart();
+    else this.createStartPrompt();
+  }
+
+  /** Begin the run immediately (multiplayer): start the world + a free initial flap so the
+   *  bird is aloft and identical across clients, instead of waiting for a tap. */
+  private autoStart(): void {
+    audio.unlock();
+    this.startRun();
+    this.birdBody.setVelocityY(-PHYSICS.flapVelocity);
+    audio.play("flap");
   }
 
   // ---------------------------------------------------------------------------
