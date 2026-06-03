@@ -23,7 +23,7 @@ import { Rng, randomSeed } from "../systems/Rng";
 import { QuestionManager, type Question } from "../systems/QuestionManager";
 import { audio } from "../systems/AudioManager";
 import { MusicBed } from "../systems/MusicBed";
-import type { GhostPosition, RoomHandle, RoomMember, RoomResult } from "../systems/Net";
+import type { GhostPosition, RoomHandle, RoomMember, RoomResult, RoomRow } from "../systems/Net";
 
 interface GameInit {
   mode: "solo" | "multi";
@@ -33,6 +33,8 @@ interface GameInit {
   roomId?: string;
   /** Live Realtime room handle, handed over from the lobby (multi only). */
   room?: RoomHandle;
+  /** Full room row, carried so "Rejouer" can hand it back to the lobby for another round. */
+  roomRow?: RoomRow;
 }
 
 /** A remote player rendered as a low-opacity ghost (multi). */
@@ -83,6 +85,9 @@ export class GameScene extends Phaser.Scene {
   private pendingPicks = new Map<string, { pseudo: string; option: string }[]>();
   private currentQuestionId: string | null = null;
   private posInterval?: number;
+  private roomRow?: RoomRow;
+  /** True while transitioning back to the lobby for another round — keeps the room alive. */
+  private rejoining = false;
 
   private rng!: Rng;
   private music = new MusicBed();
@@ -184,6 +189,8 @@ export class GameScene extends Phaser.Scene {
     this.seed = data.seed ?? randomSeed();
     this.roomId = data.roomId;
     this.room = data.room ?? null;
+    this.roomRow = data.roomRow;
+    this.rejoining = false;
   }
 
   create(): void {
@@ -265,7 +272,8 @@ export class GameScene extends Phaser.Scene {
       audio.setRate(1);
       this.music.pause();
       this.stopPosBroadcast();
-      this.room?.leave();
+      // Keep the room channel alive when heading back to the lobby for another round.
+      if (!this.rejoining) this.room?.leave();
     });
 
     // Multiplayer: a 3-2-1 countdown plays ON the game screen (everyone is already here, ready),
@@ -1420,11 +1428,20 @@ export class GameScene extends Phaser.Scene {
     // Keep refreshing while other players are still finishing.
     this.time.addEvent({ delay: 500, loop: true, callback: () => this.renderScoreboard() });
 
-    this.resultButton(cx, GAME.height * 0.82, "🏠  Salons", 0x2fa84f, 0x43c463, () => {
-      this.scene.start(SCENES.Lobby, { pseudo: this.pseudo });
-    });
+    // Rejouer → back to THIS room's lobby (keep the channel) to play another round together.
+    if (this.room && this.roomRow) {
+      this.resultButton(cx, GAME.height * 0.82, "↻  Rejouer", 0x2fa84f, 0x43c463, () => {
+        this.rejoining = true;
+        this.scene.start(SCENES.Lobby, {
+          pseudo: this.pseudo,
+          room: this.room ?? undefined,
+          roomRow: this.roomRow,
+          rejoin: true,
+        });
+      });
+    }
     this.resultButton(cx, GAME.height * 0.91, "Menu", 0x3f6fd1, 0x5a8dee, () => {
-      this.scene.start(SCENES.Menu);
+      this.scene.start(SCENES.Menu); // SHUTDOWN leaves the room (rejoining stays false)
     });
   }
 

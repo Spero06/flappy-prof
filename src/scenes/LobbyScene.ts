@@ -16,6 +16,10 @@ import {
 
 interface LobbyInit {
   pseudo: string;
+  /** Returning from a match for another round — keep the live room channel. */
+  rejoin?: boolean;
+  room?: RoomHandle;
+  roomRow?: RoomRow;
 }
 
 const TITLE_FONT = "Luckiest Guy, sans-serif";
@@ -45,6 +49,7 @@ export class LobbyScene extends Phaser.Scene {
   private isAdmin = false;
   private starting = false;
   private mode: "browse" | "create" | "join" | "room" = "browse";
+  private rejoinData?: { room: RoomHandle; roomRow: RoomRow };
 
   constructor() {
     super(SCENES.Lobby);
@@ -60,6 +65,10 @@ export class LobbyScene extends Phaser.Scene {
     this.isAdmin = false;
     this.starting = false;
     this.unsubRooms = () => {};
+    this.rejoinData =
+      data?.rejoin && data.room && data.roomRow
+        ? { room: data.room, roomRow: data.roomRow }
+        : undefined;
   }
 
   create(): void {
@@ -103,8 +112,24 @@ export class LobbyScene extends Phaser.Scene {
       return;
     }
 
-    this.showBrowse();
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => this.cleanup());
+
+    if (this.rejoinData) {
+      // Coming back from a match for another round: reuse the live channel, re-open the room,
+      // and drop straight into the in-room view. Admin is whoever is now host (re-election).
+      this.room = this.rejoinData.room;
+      this.roomRow = this.rejoinData.roomRow;
+      this.room.setHandlers({
+        onPresence: (m) => this.onPresence(m),
+        onStart: (s) => this.startGame(s),
+      });
+      this.isAdmin = this.room.isHost();
+      void setRoomStatus(this.roomRow.id, "open");
+      this.showRoom();
+      return;
+    }
+
+    this.showBrowse();
   }
 
   private cleanup(): void {
@@ -396,7 +421,15 @@ export class LobbyScene extends Phaser.Scene {
 
   private onPresence(members: RoomMember[]): void {
     this.members = members;
-    if (this.mode === "room") this.renderMembers();
+    if (this.mode !== "room") return;
+    // Re-elect the admin from presence (host left → earliest remaining member can start).
+    const nowAdmin = this.room?.isHost() ?? false;
+    if (nowAdmin !== this.isAdmin) {
+      this.isAdmin = nowAdmin;
+      this.showRoom(); // rebuild so the Commencer button appears/disappears
+      return;
+    }
+    this.renderMembers();
   }
 
   private renderMembers(): void {
@@ -426,6 +459,7 @@ export class LobbyScene extends Phaser.Scene {
       pseudo: this.pseudo,
       seed,
       roomId: this.roomRow?.id,
+      roomRow: this.roomRow ?? undefined,
       room: this.room ?? undefined,
     });
   }
