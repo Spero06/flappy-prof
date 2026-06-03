@@ -12,5 +12,7 @@
   "magnet":       [],
   "heart":        [],
   "milestone":    [],
-  "gameover":     ["audio/gameover_01.mp3"]
+  "gameover":     ["audio/gameover_01.mp3"],
+  "peer_out":     [],
+  "peer_lead":    []
 }

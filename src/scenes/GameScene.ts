@@ -23,7 +23,14 @@ import { Rng, randomSeed } from "../systems/Rng";
 import { QuestionManager, type Question } from "../systems/QuestionManager";
 import { audio } from "../systems/AudioManager";
 import { MusicBed } from "../systems/MusicBed";
-import type { GhostPosition, RoomHandle, RoomMember, RoomResult, RoomRow } from "../systems/Net";
+import type {
+  GhostPosition,
+  PeerEvent,
+  RoomHandle,
+  RoomMember,
+  RoomResult,
+  RoomRow,
+} from "../systems/Net";
 
 interface GameInit {
   mode: "solo" | "multi";
@@ -92,6 +99,11 @@ export class GameScene extends Phaser.Scene {
   private spectating = false;
   private spectateBoard?: Phaser.GameObjects.Text;
   private spectateCount?: Phaser.GameObjects.Text;
+  /** Whether we currently hold the room lead — so taking it is announced once, not every frame. */
+  private hasLead = false;
+  private lastLeadAt = 0;
+  /** Throttle for incoming peer-event sounds (don't stack when many fire at once). */
+  private lastPeerSoundAt = 0;
 
   private rng!: Rng;
   private music = new MusicBed();
@@ -231,6 +243,9 @@ export class GameScene extends Phaser.Scene {
     this.countdownActive = false;
     this.multiEnded = false;
     this.spectating = false;
+    this.hasLead = false;
+    this.lastLeadAt = 0;
+    this.lastPeerSoundAt = 0;
     this.spectateBoard = undefined;
     this.spectateCount = undefined;
     this.scoreboardText = undefined;
@@ -316,6 +331,7 @@ export class GameScene extends Phaser.Scene {
       onPosition: (p) => this.onGhostPosition(p),
       onPick: (p) => this.forwardPick(p),
       onResult: (r) => this.onGhostResult(r),
+      onPeerEvent: (e) => this.onPeerEvent(e),
     });
     // Broadcast our position ~12×/sec for ghosts + the live scoreboard. Uses a window timer
     // (NOT a scene timer) so it keeps firing while OUR game is paused for a quiz — otherwise our
@@ -415,6 +431,52 @@ export class GameScene extends Phaser.Scene {
   private onGhostResult(r: RoomResult): void {
     this.results.set(r.id, { pseudo: r.pseudo, score: r.score, finished: true });
     if (this.multiEnded) this.renderScoreboard();
+  }
+
+  /** A shared dramatic moment from another player: a peer was eliminated / took the lead. Plays a
+   *  short room-wide sound (throttled so simultaneous events don't stack) + a brief toast. Keeps
+   *  flap/pass/etc. local — only these rare beats are shared (so 20 players ≠ 20 overlapping flaps). */
+  private onPeerEvent(e: PeerEvent): void {
+    if (this.scoreboardText) return; // final results are up; stay quiet
+    const sound = e.kind === "eliminated" ? "peer_out" : "peer_lead";
+    if (this.time.now - this.lastPeerSoundAt > 250) {
+      this.lastPeerSoundAt = this.time.now;
+      audio.play(sound);
+    }
+    if (e.kind === "eliminated") {
+      this.showToast(`💀  ${e.pseudo} est éliminé !`, "#ff8a8a");
+    } else {
+      // A peer overtook everyone — if it was us they just passed, we no longer hold the lead.
+      if (this.score <= (e.score ?? 0)) this.hasLead = false;
+      this.showToast(`👑  ${e.pseudo} prend la tête !`, "#ffd23f");
+    }
+  }
+
+  /** Brief top-of-screen notice that floats up and fades (used for shared multiplayer moments). */
+  private showToast(text: string, color: string): void {
+    const t = this.add
+      .text(GAME.width / 2, GAME.height * 0.14, text, {
+        fontFamily: UI_FONT,
+        fontSize: "19px",
+        color,
+        fontStyle: "700",
+        align: "center",
+        stroke: "#1d2b53",
+        strokeThickness: 4,
+      })
+      .setOrigin(0.5)
+      .setDepth(36)
+      .setScale(0.8);
+    this.tweens.add({ targets: t, scale: 1, duration: 180, ease: "Back.Out" });
+    this.tweens.add({
+      targets: t,
+      y: t.y - 34,
+      alpha: 0,
+      delay: 1100,
+      duration: 700,
+      ease: "Sine.In",
+      onComplete: () => t.destroy(),
+    });
   }
 
   /** Route a remote pick: live to the open quiz if it's for the same question, else buffer it
@@ -1263,6 +1325,25 @@ export class GameScene extends Phaser.Scene {
     this.scoreText.setText(String(this.score));
     // Encouragement clip every 10 points ("continue, c'est bon ça !", CLAUDE.md 5.3).
     if (Math.floor(this.score / 10) > Math.floor(before / 10)) audio.play("milestone");
+    this.checkLeadChange();
+  }
+
+  /** Multiplayer: announce to the whole room (once) when we overtake everyone to take the lead. */
+  private checkLeadChange(): void {
+    if (this.mode !== "multi" || this.ghosts.size === 0 || this.score <= 0) return;
+    let othersMax = 0;
+    for (const g of this.ghosts.values()) othersMax = Math.max(othersMax, g.score);
+    if (this.score > othersMax) {
+      // Newly in front (and not spamming): tell the room + give ourselves a local crown toast.
+      if (!this.hasLead && this.time.now - this.lastLeadAt > 4000) {
+        this.hasLead = true;
+        this.lastLeadAt = this.time.now;
+        this.room?.broadcastPeerEvent({ pseudo: this.pseudo, kind: "lead", score: this.score });
+        this.showToast("👑  Tu prends la tête !", "#ffd23f");
+      }
+    } else if (this.score < othersMax) {
+      this.hasLead = false; // someone passed us — we can re-claim the lead later
+    }
   }
 
   /** Speed is a purely TIME-DRIVEN, monotonic step ramp — it only ever climbs over a run and
@@ -1398,6 +1479,8 @@ export class GameScene extends Phaser.Scene {
       this.stopPosBroadcast();
       this.results.set("self", { pseudo: this.pseudo, score: this.score, finished: true });
       this.room?.broadcastResult({ pseudo: this.pseudo, score: this.score });
+      // Tell the room one of us just went down (shared dramatic moment).
+      this.room?.broadcastPeerEvent({ pseudo: this.pseudo, kind: "eliminated" });
       this.time.delayedCall(650, () => this.enterSpectate());
       return;
     }

@@ -163,6 +163,14 @@ export interface RoomResult {
   score: number;
 }
 
+/** A shared "dramatic moment" broadcast to the whole room (a peer eliminated, a peer took the lead). */
+export interface PeerEvent {
+  id: string;
+  pseudo: string;
+  kind: "eliminated" | "lead";
+  score?: number;
+}
+
 export interface RoomHandlers {
   onPresence?: (members: RoomMember[]) => void;
   onSeed?: (seed: number) => void;
@@ -173,6 +181,8 @@ export interface RoomHandlers {
   onPick?: (p: { id: string; pseudo: string; option: string; questionId: string }) => void;
   /** A player finished — their final score for the ephemeral room scoreboard. */
   onResult?: (result: RoomResult) => void;
+  /** A shared dramatic moment (peer eliminated / peer took the lead) — for a room-wide sound + toast. */
+  onPeerEvent?: (e: PeerEvent) => void;
 }
 
 export interface RoomHandle {
@@ -187,6 +197,7 @@ export interface RoomHandle {
   broadcastPosition(p: { y: number; alive: boolean; score: number; pseudo: string }): void;
   broadcastPick(p: { pseudo: string; option: string; questionId: string }): void;
   broadcastResult(r: { pseudo: string; score: number }): void;
+  broadcastPeerEvent(e: { pseudo: string; kind: "eliminated" | "lead"; score?: number }): void;
   leave(): void;
 }
 
@@ -237,6 +248,9 @@ export function joinRoom(
   channel.on("broadcast", { event: "result" }, ({ payload }) =>
     h.onResult?.(payload as RoomResult),
   );
+  channel.on("broadcast", { event: "peer" }, ({ payload }) =>
+    h.onPeerEvent?.(payload as PeerEvent),
+  );
 
   channel.subscribe((status) => {
     if (status === "SUBSCRIBED") void channel.track({ pseudo, joinedAt });
@@ -271,6 +285,7 @@ export function joinRoom(
     broadcastPosition: (p) => send("position", { id, ...p }),
     broadcastPick: (p) => send("pick", { id, ...p }),
     broadcastResult: (r) => send("result", { id, ...r }),
+    broadcastPeerEvent: (e) => send("peer", { id, ...e }),
     leave: () => {
       void channel.untrack();
       void c.removeChannel(channel);

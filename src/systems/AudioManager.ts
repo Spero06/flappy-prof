@@ -38,6 +38,9 @@ const FALLBACK: Record<string, Blip> = {
   heart: { f: 980, d: 0.16, t: "triangle", g: 0.08 },
   milestone: { f: 1040, d: 0.2, t: "triangle", g: 0.08 },
   gameover: { f: 180, d: 0.4, t: "sawtooth", g: 0.09 },
+  // Shared multiplayer "moments": a peer eliminated (low buzz) / a peer took the lead (bright ping).
+  peer_out: { f: 240, d: 0.24, t: "sawtooth", g: 0.07 },
+  peer_lead: { f: 1180, d: 0.16, t: "triangle", g: 0.07 },
 };
 const DEFAULT_BLIP: Blip = { f: 500, d: 0.12, t: "sine", g: 0.06 };
 
