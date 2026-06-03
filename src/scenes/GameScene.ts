@@ -88,6 +88,10 @@ export class GameScene extends Phaser.Scene {
   private roomRow?: RoomRow;
   /** True while transitioning back to the lobby for another round — keeps the room alive. */
   private rejoining = false;
+  /** Eliminated but watching the others race (multi). */
+  private spectating = false;
+  private spectateBoard?: Phaser.GameObjects.Text;
+  private spectateCount?: Phaser.GameObjects.Text;
 
   private rng!: Rng;
   private music = new MusicBed();
@@ -226,6 +230,10 @@ export class GameScene extends Phaser.Scene {
     this.currentQuestionId = null;
     this.countdownActive = false;
     this.multiEnded = false;
+    this.spectating = false;
+    this.spectateBoard = undefined;
+    this.spectateCount = undefined;
+    this.scoreboardText = undefined;
     this.rng = new Rng(this.seed);
     // In multiplayer, seed the question stream too (from the shared seed, but a separate
     // sub-seed so it doesn't consume the obstacle RNG) → everyone gets the SAME questions in
@@ -855,6 +863,11 @@ export class GameScene extends Phaser.Scene {
   }
 
   update(_time: number, delta: number): void {
+    if (this.spectating) {
+      this.updateGhosts();
+      this.refreshSpectate();
+      return;
+    }
     if (!this.started || this.gameOver || this.quizActive) return;
 
     // During the post-quiz grace the bird hovers; let it drift back to center, then resume.
@@ -1380,7 +1393,7 @@ export class GameScene extends Phaser.Scene {
       this.stopPosBroadcast();
       this.results.set("self", { pseudo: this.pseudo, score: this.score, finished: true });
       this.room?.broadcastResult({ pseudo: this.pseudo, score: this.score });
-      this.time.delayedCall(650, () => this.showMultiResults());
+      this.time.delayedCall(650, () => this.enterSpectate());
       return;
     }
 
@@ -1400,8 +1413,10 @@ export class GameScene extends Phaser.Scene {
   private scoreboardText?: Phaser.GameObjects.Text;
 
   private showMultiResults(): void {
+    if (this.scoreboardText) return; // already showing (avoid re-entry from refreshSpectate)
+    this.spectating = false;
     const cx = GAME.width / 2;
-    this.add.rectangle(0, 0, GAME.width, GAME.height, 0x0a0f24, 0.9).setOrigin(0).setDepth(40);
+    this.add.rectangle(0, 0, GAME.width, GAME.height, 0x0a0f24, 0.92).setOrigin(0).setDepth(40);
     this.add
       .text(cx, GAME.height * 0.16, "Résultats", {
         fontFamily: TITLE_FONT,
@@ -1411,6 +1426,20 @@ export class GameScene extends Phaser.Scene {
       .setOrigin(0.5)
       .setDepth(41)
       .setStroke("#1d2b53", 7);
+
+    // Winner highlight (top scorer), once everyone is done.
+    const winner = [...this.results.values()].sort((a, b) => b.score - a.score)[0];
+    if (winner && this.stillRacing() === 0) {
+      this.add
+        .text(cx, GAME.height * 0.24, `🏆 Vainqueur : ${winner.pseudo} !`, {
+          fontFamily: UI_FONT,
+          fontSize: "20px",
+          color: "#ffd23f",
+          fontStyle: "700",
+        })
+        .setOrigin(0.5)
+        .setDepth(41);
+    }
 
     this.scoreboardText = this.add
       .text(cx, GAME.height * 0.3, "", {
@@ -1447,6 +1476,11 @@ export class GameScene extends Phaser.Scene {
 
   private renderScoreboard(): void {
     if (!this.scoreboardText) return;
+    this.scoreboardText.setText(this.scoreboardLines());
+  }
+
+  /** Top-5 standings as text (🥇/🥈/🥉 + 4./5., "…" = still racing). */
+  private scoreboardLines(): string {
     const entries = [...this.results.values()].sort((a, b) => b.score - a.score).slice(0, 5);
     const medals = ["🥇", "🥈", "🥉", "4.", "5."];
     const lines = entries.map((e, i) => {
@@ -1454,7 +1488,82 @@ export class GameScene extends Phaser.Scene {
       const me = e.pseudo === this.pseudo ? "  (toi)" : "";
       return `${medals[i]}  ${e.pseudo}${me} — ${e.score}${tag}`;
     });
-    this.scoreboardText.setText(lines.join("\n") || "—");
+    return lines.join("\n") || "—";
+  }
+
+  /** Number of remote players still racing (not finished). */
+  private stillRacing(): number {
+    let n = 0;
+    for (const [k, v] of this.results) if (k !== "self" && !v.finished) n += 1;
+    return n;
+  }
+
+  // --- Spectating (eliminated, watching the others) --------------------------
+
+  private enterSpectate(): void {
+    // If everyone is already done, skip straight to the final results.
+    if (this.stillRacing() === 0) {
+      this.showMultiResults();
+      return;
+    }
+    this.spectating = true;
+    const cx = GAME.width / 2;
+
+    // Clear the frozen track so the focus is the ghosts + standings (your own run is over).
+    this.bird.setVisible(false);
+    this.obstacles.setVisible(false);
+    this.poutines.setVisible(false);
+    this.powerups.setVisible(false);
+    for (const gt of this.gates) gt.banner.setVisible(false);
+
+    // Top banner + live standings panel; ghosts stay visible in the middle.
+    this.add.rectangle(cx, GAME.height * 0.14, GAME.width, GAME.height * 0.28, 0x0a0f24, 0.72).setDepth(35);
+    this.add
+      .text(cx, GAME.height * 0.05, "Tu es éliminé — tu regardes !", {
+        fontFamily: TITLE_FONT,
+        fontSize: "24px",
+        color: "#ff7a7a",
+      })
+      .setOrigin(0.5)
+      .setDepth(36)
+      .setStroke("#1d2b53", 5);
+    this.spectateCount = this.add
+      .text(cx, GAME.height * 0.1, "", {
+        fontFamily: UI_FONT,
+        fontSize: "15px",
+        color: "#9fd0ff",
+        fontStyle: "600",
+      })
+      .setOrigin(0.5)
+      .setDepth(36);
+    this.spectateBoard = this.add
+      .text(cx, GAME.height * 0.14, "", {
+        fontFamily: UI_FONT,
+        fontSize: "18px",
+        color: "#ffffff",
+        align: "left",
+        fontStyle: "600",
+        lineSpacing: 6,
+      })
+      .setOrigin(0.5, 0)
+      .setDepth(36);
+
+    this.resultButton(cx, GAME.height * 0.92, "Voir les résultats", 0x3f6fd1, 0x5a8dee, () =>
+      this.showMultiResults(),
+    );
+    this.refreshSpectate();
+  }
+
+  private refreshSpectate(): void {
+    const racing = this.stillRacing();
+    this.spectateCount?.setText(
+      racing <= 1 ? `${racing} joueur encore en course` : `${racing} joueurs encore en course`,
+    );
+    this.spectateBoard?.setText(this.scoreboardLines());
+    if (racing === 0) {
+      this.spectating = false;
+      this.showMultiResults();
+    }
   }
 
   private resultButton(
