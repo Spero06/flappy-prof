@@ -1,5 +1,5 @@
 import Phaser from "phaser";
-import { GAME, SCENES } from "../config";
+import { DEFAULT_VOLUME, GAME, SCENES } from "../config";
 import type { GameScene } from "./GameScene";
 
 interface PauseInit {
@@ -24,7 +24,7 @@ export class PauseScene extends Phaser.Scene {
 
   create(data: PauseInit): void {
     const cx = GAME.width / 2;
-    const startVol = Math.round((data?.volume ?? 0.7) * 100);
+    const startVol = Math.round((data?.volume ?? DEFAULT_VOLUME) * 100);
 
     this.add.rectangle(0, 0, GAME.width, GAME.height, 0x0a0f24, 0.82).setOrigin(0).setDepth(0);
 

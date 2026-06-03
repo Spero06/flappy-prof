@@ -34,10 +34,19 @@ export class GameOverScene extends Phaser.Scene {
   create(): void {
     const cx = GAME.width / 2;
 
-    const prevBest = Number(localStorage.getItem(BEST_KEY) ?? 0);
+    let prevBest = 0;
+    try {
+      prevBest = Number(localStorage.getItem(BEST_KEY) ?? 0);
+    } catch {
+      // storage unavailable (private mode)
+    }
     const isNewBest = this.result.score > prevBest && this.result.score > 0;
     const best = Math.max(this.result.score, prevBest);
-    localStorage.setItem(BEST_KEY, String(best));
+    try {
+      localStorage.setItem(BEST_KEY, String(best));
+    } catch {
+      // ignore
+    }
 
     this.add.rectangle(0, 0, GAME.width, GAME.height, 0x0d1330, 0.78).setOrigin(0).setDepth(0);
 

@@ -64,12 +64,25 @@ function getClient(): SupabaseClient | null {
   return client;
 }
 
+// Light, best-effort name filter for the class leaderboard (real protection is a DB CHECK —
+// see the SQL note). Strong slurs only, to avoid false positives on normal names.
+const BLOCKED = [
+  "merde", "putain", "connard", "salope", "encule", "enculé", "pute", "salaud",
+  "fuck", "shit", "bitch", "asshole", "nigg", "faggot",
+];
+function cleanName(name: string, fallback = "Anonyme"): string {
+  const n = (name ?? "").trim().slice(0, 24);
+  const low = n.toLowerCase();
+  if (!n) return fallback;
+  return BLOCKED.some((w) => low.includes(w)) ? fallback : n;
+}
+
 /** Insert a score. Returns the stored row, or null if unconfigured / on error. */
 export async function submitScore(entry: NewScore): Promise<ScoreRow | null> {
   const c = getClient();
   if (!c) return null;
   const payload = {
-    player_name: entry.player_name.trim().slice(0, 24) || "Anonyme",
+    player_name: cleanName(entry.player_name),
     score: Math.max(0, Math.floor(entry.score)),
     mode: entry.mode,
     room_code: entry.room_code ?? null,
@@ -307,9 +320,9 @@ export async function createRoom(
   const c = getClient();
   if (!c) return null;
   const payload = {
-    name: name.trim().slice(0, 24) || "Salle",
+    name: cleanName(name, "Salle"),
     password,
-    host_name: hostName.trim().slice(0, 24) || "Anonyme",
+    host_name: cleanName(hostName),
     status: "open",
   };
   try {
@@ -330,7 +343,7 @@ export async function fetchOpenRooms(): Promise<RoomRow[]> {
   const c = getClient();
   if (!c) return [];
   try {
-    const since = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+    const since = new Date(Date.now() - 30 * 60 * 1000).toISOString(); // hide stale rooms faster
     const { data, error } = await c
       .from("rooms")
       .select(ROOM_COLS)

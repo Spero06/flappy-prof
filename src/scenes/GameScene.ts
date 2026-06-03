@@ -470,7 +470,9 @@ export class GameScene extends Phaser.Scene {
     this.bird = this.physics.add
       .image(GAME.width * PHYSICS.birdX, GAME.height / 2, "bird")
       .setDepth(2);
-    this.birdBody.setCircle(20, 8, 4);
+    // Hitbox centered on the bird's body disc (texture is 60×48, body circle ~r22 at 24,24),
+    // slightly smaller than the art so collisions feel fair (not biased to one side).
+    this.birdBody.setCircle(19, 5, 5);
     this.birdBody.setAllowGravity(false);
 
     // Gentle hover until the first flap.
@@ -1256,8 +1258,11 @@ export class GameScene extends Phaser.Scene {
 
   /** All points scale by the current multiplier; difficulty is handled separately. */
   private applyScore(points: number): void {
+    const before = this.score;
     this.score += points * this.multiplier;
     this.scoreText.setText(String(this.score));
+    // Encouragement clip every 10 points ("continue, c'est bon ça !", CLAUDE.md 5.3).
+    if (Math.floor(this.score / 10) > Math.floor(before / 10)) audio.play("milestone");
   }
 
   /** Speed is a purely TIME-DRIVEN, monotonic step ramp — it only ever climbs over a run and

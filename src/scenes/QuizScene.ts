@@ -21,6 +21,7 @@ interface OptBtn {
   redraw: (fill: number) => void;
   option: string;
   pickLabel: Phaser.GameObjects.Text;
+  text: Phaser.GameObjects.Text;
 }
 
 /**
@@ -146,7 +147,23 @@ export class QuizScene extends Phaser.Scene {
       .setOrigin(0.5)
       .setDepth(2);
 
-    this.buttons.push({ container, redraw, option, pickLabel });
+    this.buttons.push({ container, redraw, option, pickLabel, text });
+  }
+
+  /** Color + a ✓/✗ glyph on each option (so results aren't conveyed by color alone). */
+  private revealOptions(pickedOption: string | null): void {
+    for (const b of this.buttons) {
+      b.container.disableInteractive();
+      if (b.option === this.question.answer) {
+        b.redraw(0x2fa84f);
+        b.text.setText(`✓  ${b.option}`);
+      } else if (b.option === pickedOption) {
+        b.redraw(0xc0392b);
+        b.text.setText(`✗  ${b.option}`);
+      } else {
+        b.redraw(0x232a4d);
+      }
+    }
   }
 
   private choose(option: string): void {
@@ -168,12 +185,7 @@ export class QuizScene extends Phaser.Scene {
     // Solo: reveal immediately + a Continuer button.
     this.answered = true;
     const correct = option === this.question.answer;
-    for (const b of this.buttons) {
-      b.container.disableInteractive();
-      if (b.option === this.question.answer) b.redraw(0x2fa84f);
-      else if (b.option === option) b.redraw(0xc0392b);
-      else b.redraw(0x232a4d);
-    }
+    this.revealOptions(option);
     this.showExplanation(correct);
     this.createContinueButton(correct);
   }
@@ -208,12 +220,7 @@ export class QuizScene extends Phaser.Scene {
     if (this.answered) return;
     this.answered = true;
     const correct = this.picked === this.question.answer;
-    for (const b of this.buttons) {
-      b.container.disableInteractive();
-      if (b.option === this.question.answer) b.redraw(0x2fa84f);
-      else if (b.option === this.picked) b.redraw(0xc0392b);
-      else b.redraw(0x232a4d);
-    }
+    this.revealOptions(this.picked);
     this.showExplanation(correct);
     this.time.delayedCall(QUIZ.revealMs, () => this.startResumeCountdown(correct));
   }
