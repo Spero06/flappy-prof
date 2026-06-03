@@ -458,20 +458,43 @@ export class GameScene extends Phaser.Scene {
     return this.slotQueue.shift() as Slot;
   }
 
-  /** One cycle: a pillar run (with a power-up if frequency allows), an open poutine stretch + a
-   *  power-up, a shorter run, then the quiz gate. POWERUPS.perCycle controls how many appear. */
+  /** A randomized cycle (seeded, so multiplayer stays fair): a shuffled mix of pillar runs,
+   *  poutine stretches and power-ups, with exactly ONE quiz gate dropped at a random position.
+   *  Varying the order + counts each cycle keeps the level from feeling like the same loop. */
   private buildCycle(): Slot[] {
-    const cycle: Slot[] = [];
-    const run1 = this.rng.int(SEGMENTS.pipeRunMin, SEGMENTS.pipeRunMax);
-    for (let i = 0; i < run1; i++) cycle.push("pipe");
-    // A second power-up (when perCycle >= 2) rides early, after the first pillar run.
-    if (POWERUPS.perCycle >= 2) cycle.push("powerup");
-    for (let i = 0; i < SEGMENTS.poutineRun; i++) cycle.push("poutine");
-    cycle.push("powerup");
-    const run2 = this.rng.int(SEGMENTS.pipesBeforeGateMin, SEGMENTS.pipesBeforeGateMax);
-    for (let i = 0; i < run2; i++) cycle.push("pipe");
-    cycle.push("gate");
-    return cycle;
+    type Chunk = { t: Slot; n: number };
+    const chunks: Chunk[] = [];
+
+    // 2–3 pillar runs of varying length.
+    const runs = this.rng.int(2, 3);
+    for (let i = 0; i < runs; i++) {
+      chunks.push({ t: "pipe", n: this.rng.int(SEGMENTS.pipeRunMin, SEGMENTS.pipeRunMax) });
+    }
+    // 1–2 open poutine stretches.
+    const stretches = this.rng.int(1, 2);
+    for (let i = 0; i < stretches; i++) {
+      chunks.push({ t: "poutine", n: this.rng.int(2, SEGMENTS.poutineRun) });
+    }
+    // Power-ups (baseline POWERUPS.perCycle).
+    for (let i = 0; i < POWERUPS.perCycle; i++) chunks.push({ t: "powerup", n: 1 });
+
+    this.shuffleSeeded(chunks);
+
+    // Exactly one quiz gate, never at the very start (keeps a little lead-in before the wall).
+    const gateAt = this.rng.int(1, chunks.length);
+    chunks.splice(gateAt, 0, { t: "gate", n: 1 });
+
+    const slots: Slot[] = [];
+    for (const c of chunks) for (let i = 0; i < c.n; i++) slots.push(c.t);
+    return slots;
+  }
+
+  /** In-place Fisher–Yates using the seeded RNG (deterministic per seed). */
+  private shuffleSeeded<T>(arr: T[]): void {
+    for (let i = arr.length - 1; i > 0; i--) {
+      const j = this.rng.int(0, i);
+      [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
   }
 
   private spawnSlot(): void {
@@ -578,7 +601,8 @@ export class GameScene extends Phaser.Scene {
     pw.setDepth(3);
     pw.setData("kind", kind);
     const body = pw.body as Phaser.Physics.Arcade.Body;
-    body.setCircle(POWERUPS.radius, 24 - POWERUPS.radius, 24 - POWERUPS.radius);
+    // Texture is 64×64; centre the (generous) pickup circle on the disc.
+    body.setCircle(POWERUPS.radius, 32 - POWERUPS.radius, 32 - POWERUPS.radius);
     body.setVelocityX(-this.currentSpeed);
 
     this.tweens.add({
@@ -591,8 +615,17 @@ export class GameScene extends Phaser.Scene {
     });
     this.tweens.add({
       targets: pw,
-      angle: { from: -8, to: 8 },
-      duration: 1200,
+      angle: { from: -7, to: 7 },
+      duration: 1300,
+      yoyo: true,
+      repeat: -1,
+      ease: "Sine.InOut",
+    });
+    // Gentle breathing pulse so power-ups pop on the track.
+    this.tweens.add({
+      targets: pw,
+      scale: { from: 0.9, to: 1.08 },
+      duration: 650,
       yoyo: true,
       repeat: -1,
       ease: "Sine.InOut",

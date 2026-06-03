@@ -147,69 +147,97 @@ export class PreloadScene extends Phaser.Scene {
     this.generatePowerupTextures();
   }
 
-  /** Power-up collectibles: a coloured disc + a simple symbol, so each kind reads at a glance. */
+  /**
+   * Power-up collectibles: a glowing coin-like disc + a crisp white symbol so each kind reads
+   * instantly. 64×64 with a soft accent halo, a glossy top highlight, and a bright rim.
+   */
   private generatePowerupTextures(): void {
-    const S = 48;
+    const S = 64;
     const c = S / 2;
+    const R = 22;
 
-    // Helper: filled disc with a soft ring.
-    const disc = (g: Phaser.GameObjects.Graphics, color: number) => {
-      g.fillStyle(0x000000, 0.22);
-      g.fillCircle(c, c + 2, 21);
-      g.fillStyle(color, 1);
-      g.fillCircle(c, c, 21);
-      g.lineStyle(3, 0xffffff, 0.85);
-      g.strokeCircle(c, c, 21);
+    // Glowing disc base in `base`, haloed/rimmed in the brighter `glow`.
+    const disc = (g: Phaser.GameObjects.Graphics, base: number, glow: number) => {
+      g.fillStyle(glow, 0.18);
+      g.fillCircle(c, c, R + 8);
+      g.fillStyle(glow, 0.16);
+      g.fillCircle(c, c, R + 4);
+      g.fillStyle(0x000000, 0.28);
+      g.fillCircle(c, c + 2, R);
+      g.fillStyle(base, 1);
+      g.fillCircle(c, c, R);
+      g.fillStyle(0xffffff, 0.16); // glossy top highlight
+      g.fillEllipse(c, c - 8, R * 1.4, R * 0.8);
+      g.lineStyle(3, 0xffffff, 0.92);
+      g.strokeCircle(c, c, R);
+      g.lineStyle(2, glow, 0.9);
+      g.strokeCircle(c, c, R + 3);
     };
 
-    // Horloge (slow-mo) — cyan clock with two hands.
+    // Horloge (slow-mo) — cyan clock with tick marks + two hands.
     const clock = this.add.graphics();
-    disc(clock, 0x1f9fd0);
-    clock.lineStyle(3, 0xffffff, 1);
+    disc(clock, 0x1f9fd0, 0x66d6ff);
+    clock.lineStyle(2, 0xffffff, 0.8);
+    for (let k = 0; k < 12; k++) {
+      const a = (k / 12) * Math.PI * 2;
+      const x1 = c + Math.cos(a) * (R - 4);
+      const y1 = c + Math.sin(a) * (R - 4);
+      const x2 = c + Math.cos(a) * (R - 7);
+      const y2 = c + Math.sin(a) * (R - 7);
+      clock.beginPath();
+      clock.moveTo(x1, y1);
+      clock.lineTo(x2, y2);
+      clock.strokePath();
+    }
+    clock.lineStyle(4, 0xffffff, 1);
     clock.beginPath();
     clock.moveTo(c, c);
-    clock.lineTo(c, c - 11);
+    clock.lineTo(c, c - 13);
     clock.strokePath();
     clock.beginPath();
     clock.moveTo(c, c);
-    clock.lineTo(c + 8, c + 3);
+    clock.lineTo(c + 10, c + 4);
     clock.strokePath();
     clock.fillStyle(0xffffff, 1);
-    clock.fillCircle(c, c, 2.5);
+    clock.fillCircle(c, c, 3);
     clock.generateTexture("pw_clock", S, S);
     clock.destroy();
 
-    // Étoile (invincible) — gold star.
+    // Étoile (invincible) — full gold star.
     const star = this.add.graphics();
-    disc(star, 0xe0a92b);
-    star.fillStyle(0xfff2b0, 1);
-    star.fillPoints(this.starPoints(c, c, 5, 13, 6), true);
+    disc(star, 0xe0a92b, 0xffe070);
+    star.fillStyle(0xfff4c0, 1);
+    star.fillPoints(this.starPoints(c, c, 5, 16, 7.5), true);
+    star.fillStyle(0xffffff, 0.5);
+    star.fillCircle(c - 3, c - 4, 2.5);
     star.generateTexture("pw_star", S, S);
     star.destroy();
 
-    // Cœur (+1 vie) — red heart.
+    // Cœur (+1 vie) — rounded red heart.
     const heart = this.add.graphics();
-    disc(heart, 0xd23b53);
+    disc(heart, 0xd23b53, 0xff7a93);
     heart.fillStyle(0xffffff, 1);
-    heart.fillCircle(c - 5, c - 3, 5.5);
-    heart.fillCircle(c + 5, c - 3, 5.5);
-    heart.fillTriangle(c - 10, c - 1, c + 10, c - 1, c, c + 12);
+    heart.fillCircle(c - 6, c - 4, 7.5);
+    heart.fillCircle(c + 6, c - 4, 7.5);
+    heart.fillTriangle(c - 13, c - 1, c + 13, c - 1, c, c + 15);
+    heart.fillStyle(0xff9db0, 0.6);
+    heart.fillCircle(c - 6, c - 5, 2.5);
     heart.generateTexture("pw_heart", S, S);
     heart.destroy();
 
-    // Aimant à poutine (magnet) — purple horseshoe magnet.
+    // Aimant à poutine (magnet) — purple horseshoe with red tips.
     const magnet = this.add.graphics();
-    disc(magnet, 0x8b4fd0);
-    magnet.lineStyle(7, 0xffffff, 1);
+    disc(magnet, 0x8b4fd0, 0xc79bff);
+    magnet.lineStyle(9, 0xffffff, 1);
     magnet.beginPath();
-    magnet.arc(c, c - 2, 9, Phaser.Math.DegToRad(180), Phaser.Math.DegToRad(360), false);
+    magnet.arc(c, c - 3, 11, Phaser.Math.DegToRad(180), Phaser.Math.DegToRad(360), false);
     magnet.strokePath();
     magnet.fillStyle(0xffffff, 1);
-    magnet.fillRect(c - 12.5, c - 2, 7, 11);
-    magnet.fillRect(c + 5.5, c - 2, 7, 11);
+    magnet.fillRect(c - 15.5, c - 3, 9, 13);
+    magnet.fillRect(c + 6.5, c - 3, 9, 13);
     magnet.fillStyle(0xff5c5c, 1);
-    magnet.fillRect(c - 12.5, c + 6, 7, 4);
-    magnet.fillRect(c + 5.5, c + 6, 7, 4);
+    magnet.fillRect(c - 15.5, c + 7, 9, 5);
+    magnet.fillRect(c + 6.5, c + 7, 9, 5);
     magnet.generateTexture("pw_magnet", S, S);
     magnet.destroy();
   }
